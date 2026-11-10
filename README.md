@@ -75,3 +75,26 @@ Uses [ICDAR 2019 SROIE](https://rrc.cvc.uab.es/?ch=13) (Huang et al., 2019) via
 Hugging Face [`jsdnrs/ICDAR2019-SROIE`](https://huggingface.co/datasets/jsdnrs/ICDAR2019-SROIE),
 licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The dataset is
 not included in this repository. See [docs/dataset.md](docs/dataset.md).
+
+## Claude Code skills
+
+Project-specific skills live in `.claude/skills/`:
+
+| Skill | Use it for |
+|---|---|
+| `receipt-ocr-pipeline` | Receipt/PDF ingestion, image preprocessing, OCR integration, troubleshooting |
+| `receipt-field-extraction` | Extracting and validating merchant, date, currency, totals, tax, and line items |
+| `receipt-dataset-evaluation` | Public dataset selection, annotation, leakage prevention, OCR/field metrics |
+| `receiptiq-python-engineering` | Python implementation, refactoring, typing, errors, tests, configuration |
+| `receiptiq-review` | Reviewing diffs for correctness, financial integrity, privacy, security, and tests |
+| `receiptiq-docs` | Setup, architecture, API, evaluation, and portfolio documentation |
+
+## Project rules
+
+- Inspect existing decisions before choosing frameworks or adding dependencies.
+- Distinguish implemented functionality from proposed work.
+- Treat OCR and extracted fields as uncertain candidates, not verified financial truth.
+- Preserve source evidence and provenance for extracted values.
+- Use exact decimal arithmetic for money and explicit locale/currency handling.
+- Never commit real receipts, personal data, secrets, or credentials; use synthetic fixtures.
+- Never claim benchmark accuracy or performance without reproducible evaluation.
