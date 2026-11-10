@@ -1,0 +1,52 @@
+# --- Data: never commit datasets, receipt images or OCR outputs ---
+data/
+outputs/
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+*.bmp
+*.webp
+*.parquet
+*.arrow
+
+# --- Model weights / exported models ---
+*.pdparams
+*.pdiparams
+*.pdmodel
+*.pdopt
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+models/
+.paddlex/
+
+# --- Secrets ---
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# --- Python / tooling caches ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.cache/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
