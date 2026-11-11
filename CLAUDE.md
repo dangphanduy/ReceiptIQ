@@ -33,6 +33,7 @@ $PY -m pytest                                       # unit tests; never load the
 $PY -m pytest tests/test_ocr_schema.py::test_drops_blank_text
 $PY scripts/download_sroie.py [--export-samples N] [--revision REV]   # ~1.1 GB into data/
 $PY scripts/run_ocr_baseline.py data/samples/<key>.jpg              # -> outputs/ocr/<key>.json
+$PY scripts/eda_sroie.py [--seed 42 --n 20]                         # train-split EDA -> outputs/eda/, see docs/eda.md
 ```
 
 The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.paddlex/official_models`.
