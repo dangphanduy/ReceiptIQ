@@ -4,6 +4,7 @@ import math
 import random
 import subprocess
 import sys
+from fractions import Fraction
 
 import pytest
 
@@ -72,6 +73,59 @@ def test_iou_properties_on_random_boxes_of_any_magnitude():
             assert iou(*scaled) == value
         overlapping += value > 0
     assert overlapping > 100  # the overlap branch is exercised, not only disjoint pairs
+
+
+def test_thin_box_spanning_the_float_range():
+    # One shared scale for both axes underflowed the 1e-100 height to 0.
+    a = [0, 0, 1e308, 1e-100]
+    assert iou(a, a) == 1.0
+    assert iou(a, [0, 0, 1e308, 0.5e-100]) == 0.5
+    assert iou([0, -1e-100, 1e308, 0], [0, -1e-100, 1e308, 0]) == 1.0
+
+
+def test_true_iou_just_below_threshold_never_matches_even_if_float_rounds_to_it():
+    gt = [0, 0, 1, 2**60 + 1]  # ints: exact, unlike float(2**60 + 1)
+    pred = [0, 0, 1, 2**59]  # inside gt; IoU = 2**59 / (2**60 + 1), just below 0.5
+    assert iou(pred, gt) == 0.5  # the correctly rounded float
+    assert detection_counts([pred], [gt]) == {"tp": 0, "fp": 1, "fn": 1}
+
+
+@pytest.mark.parametrize("bad", [[0, 0, True, 10], [False, 0, 10, 10]])
+def test_bool_coordinates_are_invalid(bad):
+    assert iou(A, bad) == 0.0
+
+
+def _reference_iou(a, b):
+    """Independent exact IoU straight from the definition."""
+    ax0, ay0, ax1, ay1 = map(Fraction, a)
+    bx0, by0, bx1, by1 = map(Fraction, b)
+    w = max(Fraction(0), min(ax1, bx1) - max(ax0, bx0))
+    h = max(Fraction(0), min(ay1, by1) - max(ay0, by0))
+    inter = w * h
+    return float(inter / ((ax1 - ax0) * (ay1 - ay0) + (bx1 - bx0) * (by1 - by0) - inter))
+
+
+def test_iou_equals_exact_reference_at_mixed_magnitudes_per_axis():
+    rng = random.Random(0)
+
+    def span(scale):
+        lo, hi = sorted(rng.uniform(-scale, scale) for _ in range(2))
+        assert hi > lo
+        return lo, hi
+
+    overlapping = 0
+    for _ in range(500):
+        sx, sy = 10.0 ** rng.uniform(-300, 300), 10.0 ** rng.uniform(-300, 300)
+        (ax0, ax1), (ay0, ay1) = span(sx), span(sy)
+        (bx0, bx1), (by0, by1) = span(sx), span(sy)
+        a, b = [ax0, ay0, ax1, ay1], [bx0, by0, bx1, by1]
+        value = iou(a, b)
+        assert value == _reference_iou(a, b)
+        assert 0.0 <= value <= 1.0  # also false for NaN
+        assert iou(b, a) == value
+        assert iou(a, a) == 1.0
+        overlapping += value > 0
+    assert overlapping > 100  # the exact-arithmetic branch is exercised, not only fast rejects
 
 
 @pytest.mark.parametrize(
