@@ -63,6 +63,7 @@ $PY scripts/run_ocr_baseline.py data/samples/<key>.jpg              # -> outputs
 $PY scripts/run_ocr_batch.py --split test [--limit N] [--out-dir D] # -> outputs/ocr/<split>/<key>.json + manifest.json; resumable
 $PY scripts/eda_sroie.py [--seed 42 --n 20]                         # train-split EDA -> outputs/eda/, see docs/eda.md
 $PY scripts/eval_ocr_detection.py --split test --ocr-dir outputs/ocr/test-gpu [--out F] [--iou 0.5]  # -> outputs/eval/detection_test.json
+$PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu [--out F] [--iou 0.5]  # -> outputs/eval/recognition_test.json
 
 G=/e/Anaconda/Enviroment/riq-gpu/python.exe        # GPU env, see Environment
 $G -m pytest                                        # tests must pass in both envs
@@ -102,11 +103,19 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   `micro` (summed counts). Like `ocr_schema.py` it must not import paddle, cv2 or datasets.
   `scripts/eval_ocr_detection.py` reads GT `key`/`bboxes`/`image_size` only; keys without OCR
   JSON are listed as missing, never scored as all-FN. GT splits lines at commas while OCR returns
-  whole lines, so line-level IoU undercounts. CER / end-to-end / field metrics are not implemented yet.
+  whole lines, so line-level IoU undercounts.
   The canonical full-test GPU output is `outputs/ocr/test-gpu/`; `outputs/ocr/test/` holds only a
   stale 2-row CPU manifest from RIQ-18 (leave it).
   SROIE ground truth has typos (e.g. `X00016469670` address says `B1750`, receipt shows `81750`),
   so when OCR and ground truth disagree, look at the image before blaming the model.
+- `ml/text_norm.py` (RIQ-20) holds `normalize_text` (uppercase, collapse whitespace, strip), the
+  ONE text normalization; field evaluation (E3 / RIQ-29) must import it, never copy it.
+  `ml/ocr_recognition.py` is pure-Python `edit_distance` (Levenshtein, code points), `line_pairs`
+  (CER / exact match on `match_greedy` pairs; empty normalized GT → CER None) and `summarize`.
+  `scripts/eval_ocr_recognition.py` reuses `load_ocr` / `load_gt_rows` / `resolve_device` from
+  `scripts/eval_ocr_detection.py` (same input contract) and reads GT `key`/`words`/`bboxes`/`image_size`.
+  Many GT `words` are cut at the first comma while the box spans the whole line, which inflates
+  CER. End-to-end (word-level) and field metrics are not implemented yet.
 
 ## Rules specific to this repo
 

@@ -155,6 +155,38 @@ $PY scripts/eval_ocr_detection.py --split test --ocr-dir outputs/ocr/test-gpu
   (e.g. a handwritten total), which SROIE GT does not annotate. Treat these scores as a
   lower bound on detection quality, not as a SROIE Task 1 leaderboard number.
 
+### Recognition metrics (RIQ-20)
+
+```bash
+$PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu
+#   [--out outputs/eval/recognition_test.json] [--iou 0.5]
+```
+
+- Pairs are exactly the detection TP pairs: `ml.ocr_eval.match_greedy` at IoU ≥ `--iou`.
+  The GT text of `bboxes[i]` is `words[i]`; a row whose `words` and `bboxes` differ in
+  length is refused (on the pinned revision they are equal on every train and test row).
+- **Normalization** (`ml/text_norm.py`, `normalize_text`, the single copy that field
+  evaluation in E3 must reuse): uppercase, collapse every whitespace run (tabs, newlines,
+  U+00A0, ...) to one space, strip. No Unicode NFC/NFKC, no punctuation removal.
+  Uppercasing can change length (`ß` → `SS`).
+- Per pair: CER = Levenshtein distance over code points (`ml/ocr_recognition.py`, pure
+  Python) / length of the normalized GT. CER can exceed 1 when the prediction is longer.
+  Exact match = normalized texts are equal.
+- **Empty-GT rule:** a pair whose normalized GT is empty has no CER. It is left out of the
+  CER stats and counted in `skipped_empty_gt`, but its exact match still counts.
+- The report has the same provenance and input contract as detection (`missing_keys`,
+  `size_mismatch_keys`, mixed schema/device refused, malformed JSON fails naming the file,
+  GT columns `key`/`words`/`bboxes`/`image_size` only, atomic write) plus `normalization`,
+  `counts` {`images_evaluated`, `missing`, `pairs`, `cer_pairs`, `skipped_empty_gt`},
+  `cer` {`mean`, `median`} over pairs, `exact_match_rate` and the 20 `worst_lines`
+  (CER desc, ties by key and GT index). Any stat with an empty denominator is `null`.
+- **Caveat: segmentation, not recognition, dominates the worst lines.** Many GT `words`
+  are cut at the first comma while their box covers the whole printed line (e.g. GT `9`
+  for the printed `9, JALAN SUBANG JASA 3,`). OCR reads the full line, so the pair gets a
+  CER far above 1 although OCR read it correctly. These pairs pull the mean CER up
+  strongly; the median is much less affected. GT typos (see below) also count as OCR
+  errors. Check the image before calling a worst line a model error.
+
 ## Sanity check on 30 test samples (RIQ-17)
 
 A manual check before writing any evaluation code. It is not a benchmark.
@@ -224,8 +256,8 @@ Text quoted above comes from SROIE ground truth and images. See the
 
 ## How it will be measured
 
-Detection (item 1 below) is implemented in RIQ-19. Everything else in this section is
-planned, not implemented yet.
+Detection (item 1 below) is implemented in RIQ-19 and recognition (item 2) in RIQ-20.
+Everything else in this section is planned, not implemented yet.
 
 Evaluate on the **test split** only (361 images). Train is kept for later error analysis and tuning.
 
@@ -255,8 +287,10 @@ For `company`, `date`, `address`, `total`:
 
 ## Known limitations
 
-- Detection metrics exist (RIQ-19). Recognition (CER), end-to-end and field-accuracy metrics
-  are not implemented yet.
+- Detection (RIQ-19) and recognition (RIQ-20: CER and line exact match on matched pairs)
+  metrics exist. End-to-end (word-level) and field-accuracy metrics are not implemented yet.
+- Recognition is only scored on detection-matched pairs, so unmatched lines never reach it,
+  and GT lines cut at a comma inflate CER (see the RIQ-20 caveat above).
 - Detection is scored at line level against GT boxes that often split one printed line, so
   recall and precision are underestimated (see the RIQ-19 caveat above). There is no
   word-level or polygon matching, and no Hungarian (optimal) assignment.

@@ -13,9 +13,11 @@ provenance and CC BY 4.0 attribution.
 
 - `ml/`: `ocr_schema.py` (versioned OCR JSON contract), `ocr_engine.py` (the only place
   PaddleOCR is configured: `OCR_CONFIG`, `create_engine(device)`, `run_ocr`), `ocr_eval.py`
-  (IoU, greedy matching, P/R/F1). `ocr_schema.py` and `ocr_eval.py` stay pure Python: they
-  never import paddle, cv2 or datasets.
-- `scripts/`: download SROIE, single-image OCR, resumable batch OCR, detection eval, EDA.
+  (IoU, greedy matching, P/R/F1), `text_norm.py` (`normalize_text`, the one text
+  normalization), `ocr_recognition.py` (edit distance, CER, line exact match). These four
+  stay pure Python: they never import paddle, cv2 or datasets.
+- `scripts/`: download SROIE, single-image OCR, resumable batch OCR, detection and
+  recognition eval, EDA.
 - `tests/`: fast, model-free pytest. `docs/`: provenance, plans, findings.
 - `data/` and `outputs/` are generated locally and stay untracked.
 
@@ -31,6 +33,7 @@ $PY -m ruff format . && $PY -m ruff check . && $PY -m pytest   # run pytest in b
 $PY scripts/run_ocr_baseline.py data/samples/<key>.jpg [--device cpu]
 $G  scripts/run_ocr_batch.py --split test --device gpu:0 --out-dir outputs/ocr/test-gpu
 $PY scripts/eval_ocr_detection.py --split test --ocr-dir outputs/ocr/test-gpu
+$PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu
 ```
 
 - `--device` is `cpu` (default) or `gpu:<int>`. Each OCR JSON records `engine.device`; the
