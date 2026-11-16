@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import run_ocr_batch as batch_module
 from PIL import Image
-from run_ocr_batch import run_batch
+from run_ocr_batch import ocr_meta, run_batch
 
 from ml.ocr_engine import OCR_CONFIG, run_ocr
 from ml.ocr_schema import SCHEMA_VERSION
@@ -35,8 +35,8 @@ def rows(*keys):
 class FakeOcr:
     """Stands in for the real engine: records calls, fails on chosen keys."""
 
-    def __init__(self, fail_on=()):
-        self.calls, self.fail_on = [], set(fail_on)
+    def __init__(self, fail_on=(), device="cpu"):
+        self.calls, self.fail_on, self.device = [], set(fail_on), device
 
     def __call__(self, image_bytes, image_path):
         assert isinstance(image_bytes, bytes)
@@ -44,7 +44,12 @@ class FakeOcr:
         self.calls.append(key)
         if key in self.fail_on:
             raise RuntimeError(f"boom {key}")
-        return {"schema_version": SCHEMA_VERSION, "image": {"path": image_path}, "lines": []}
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "image": {"path": image_path},
+            "engine": ocr_meta(self.device),
+            "lines": [],
+        }
 
 
 def batch(tmp_path, data, ocr, limit=None, device="cpu"):
@@ -68,13 +73,14 @@ def test_writes_one_json_per_row(tmp_path):
 
 
 def test_resume_skips_keys_with_output(tmp_path):
-    (tmp_path / "A.json").write_text("{}", encoding="utf-8")
+    previous = json.dumps({"engine": ocr_meta("cpu")})
+    (tmp_path / "A.json").write_text(previous, encoding="utf-8")
     ocr = FakeOcr()
 
     manifest = batch(tmp_path, rows("A", "B"), ocr)
 
     assert ocr.calls == ["B"]
-    assert (tmp_path / "A.json").read_text(encoding="utf-8") == "{}"
+    assert (tmp_path / "A.json").read_text(encoding="utf-8") == previous
     assert manifest["counts"] == {"processed": 1, "skipped": 1, "failed": 0}
 
 
@@ -355,8 +361,10 @@ def snapshot(directory):
 
 
 def test_manifest_records_requested_device(tmp_path, cpu_versions):
-    manifest = batch(tmp_path, rows("A"), FakeOcr(), device="gpu:0")
+    manifest = batch(tmp_path, rows("A"), FakeOcr(device="gpu:0"), device="gpu:0")
     assert manifest["ocr"]["device"] == "gpu:0"
+    doc = json.loads((tmp_path / "A.json").read_text(encoding="utf-8"))
+    assert doc["engine"]["device"] == "gpu:0"
 
 
 def test_rerun_with_same_device_and_paddle_resumes(tmp_path, cpu_versions):
@@ -416,6 +424,64 @@ def test_manifest_from_before_riq57_counts_as_cpu_paddlepaddle(tmp_path, cpu_ver
     assert manifest["counts"]["processed"] == 1
 
 
+def test_manifest_without_device_is_refused_without_writes(tmp_path, cpu_versions):
+    old = {"ocr": {"paddlepaddle_version": "3.3.1"}}
+    (tmp_path / "manifest.json").write_text(json.dumps(old), encoding="utf-8")
+    before = snapshot(tmp_path)
+    ocr = FakeOcr()
+
+    with pytest.raises(batch_module.MixedResultsError, match="another --out-dir"):
+        batch(tmp_path, rows("A"), ocr)
+
+    assert ocr.calls == []
+    assert snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("contents", ["{broken", "{}", '{"ocr": null}'])
+def test_invalid_manifest_is_refused_without_writes(tmp_path, cpu_versions, contents):
+    (tmp_path / "manifest.json").write_text(contents, encoding="utf-8")
+    before = snapshot(tmp_path)
+    ocr = FakeOcr()
+
+    with pytest.raises(batch_module.MixedResultsError, match="another --out-dir"):
+        batch(tmp_path, rows("A"), ocr)
+
+    assert ocr.calls == []
+    assert snapshot(tmp_path) == before
+
+
+def test_key_without_engine_metadata_is_refused_without_writes(tmp_path, cpu_versions):
+    (tmp_path / "A.json").write_text("{}", encoding="utf-8")
+    before = snapshot(tmp_path)
+    ocr = FakeOcr()
+
+    with pytest.raises(batch_module.MixedResultsError, match="another --out-dir"):
+        batch(tmp_path, rows("A", "B"), ocr)
+
+    assert ocr.calls == []
+    assert snapshot(tmp_path) == before
+
+
+def test_cli_refuses_corrupt_manifest_before_loading_data(tmp_path, monkeypatch, cpu_versions):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "manifest.json").write_text(json.dumps(DATASET_MANIFEST), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "manifest.json").write_text("{broken", encoding="utf-8")
+    before = snapshot(out_dir)
+    fake_datasets = types.ModuleType("datasets")
+    fake_datasets.load_from_disk = lambda path: pytest.fail("must refuse before loading data")
+    monkeypatch.setitem(sys.modules, "datasets", fake_datasets)
+    monkeypatch.setattr(batch_module, "DATA_DIR", data_dir)
+    monkeypatch.setattr(sys, "argv", ["run_ocr_batch.py", "--out-dir", str(out_dir)])
+
+    with pytest.raises(SystemExit, match="unreadable.*another --out-dir"):
+        batch_module.main()
+
+    assert snapshot(out_dir) == before
+
+
 def test_cli_passes_device_and_refuses_mixing_before_loading_model(
     tmp_path, monkeypatch, cpu_versions
 ):
@@ -446,8 +512,9 @@ def test_cli_passes_device_and_refuses_mixing_before_loading_model(
     assert json.loads((out_dir / "manifest.json").read_text(encoding="utf-8")) == previous
 
 
-def test_cli_rejects_bad_device(monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["run_ocr_batch.py", "--device", "cuda:0"])
+@pytest.mark.parametrize("device", ["gpu", "gpu:-1", "GPU:0", "cuda:0"])
+def test_cli_rejects_bad_device(monkeypatch, capsys, device):
+    monkeypatch.setattr(sys, "argv", ["run_ocr_batch.py", "--device", device])
 
     with pytest.raises(SystemExit) as exc_info:
         batch_module.main()

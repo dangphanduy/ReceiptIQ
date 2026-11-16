@@ -1,6 +1,7 @@
 """--device plumbing and paddle-distribution detection. Never imports the real paddle."""
 
 import argparse
+import builtins
 import sys
 import types
 from importlib.metadata import PackageNotFoundError
@@ -91,12 +92,20 @@ def fake_paddle(monkeypatch):
     return state, calls
 
 
-def test_create_engine_imports_paddleocr_before_paddle(fake_paddle):
+def test_create_engine_imports_paddleocr_before_paddle(fake_paddle, monkeypatch):
     # Real failure (riq-gpu env): paddle-gpu first, then paddlex -> modelscope -> torch
     # fails loading torch's cuDNN with WinError 127.
-    state, _ = fake_paddle
+    imports = []
+    real_import = builtins.__import__
+
+    def track_import(name, *args, **kwargs):
+        if name in {"paddleocr", "paddle"}:
+            imports.append(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", track_import)
     create_engine("gpu:0")
-    assert state["order"][:2] == ["paddleocr", "paddle"]
+    assert imports[:2] == ["paddleocr", "paddle"]
 
 
 @pytest.mark.parametrize("device", ["cpu", "gpu:0"])
@@ -168,10 +177,11 @@ def test_baseline_cli_passes_device_to_engine_and_document(tmp_path, monkeypatch
     assert seen == {"create": "gpu:0", "run": "gpu:0"}
 
 
-def test_baseline_cli_rejects_bad_device(monkeypatch, capsys):
+@pytest.mark.parametrize("device", ["gpu", "gpu:-1", "GPU:0", "cuda"])
+def test_baseline_cli_rejects_bad_device(monkeypatch, capsys, device):
     import run_ocr_baseline as baseline
 
-    monkeypatch.setattr(sys, "argv", ["run_ocr_baseline.py", "x.jpg", "--device", "cuda"])
+    monkeypatch.setattr(sys, "argv", ["run_ocr_baseline.py", "x.jpg", "--device", device])
 
     with pytest.raises(SystemExit) as exc_info:
         baseline.main()

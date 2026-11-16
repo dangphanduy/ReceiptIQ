@@ -57,10 +57,14 @@ def check_no_mixing(out_dir: Path, meta: Mapping) -> None:
     """
     want = {field: meta[field] for field in MIXING_FIELDS}
     for path in sorted(out_dir.glob("*.json")):
-        doc = json.loads(path.read_text(encoding="utf-8"))
-        have = doc.get("ocr") if path.name == "manifest.json" else doc.get("engine")
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise MixedResultsError(f"{path} is unreadable; pick another --out-dir.") from exc
+        field = "ocr" if path.name == "manifest.json" else "engine"
+        have = doc.get(field) if isinstance(doc, dict) else None
         if not isinstance(have, dict):
-            continue
+            raise MixedResultsError(f"{path} lacks OCR metadata; pick another --out-dir.")
         # Before RIQ-57 only CPU paddlepaddle could run (engine_versions asked for it by name).
         have = {"paddlepaddle_distribution": "paddlepaddle", **have}
         if any(have.get(field) != value for field, value in want.items()):
