@@ -113,6 +113,30 @@ class _RaisingSequence:
         raise RuntimeError("boom")
 
 
+def _boom(*args, **kwargs):
+    raise RuntimeError("hostile hook")
+
+
+class _FiniteFloat(float):  # Codex's case
+    as_integer_ratio = _boom
+
+
+class _RaisingGtInt(int):
+    __gt__ = __lt__ = __ge__ = __le__ = _boom
+
+
+class _HostileList(list):
+    __iter__ = __getitem__ = __len__ = _boom
+
+
+class _PlainTuple(tuple):
+    pass
+
+
+class _HostileFloat(float):
+    __float__ = __sub__ = __rsub__ = _boom
+
+
 def _np(kind, values):  # build numpy scalars lazily so collection works without numpy
     return lambda: [getattr(np, kind)(v) for v in values]
 
@@ -127,9 +151,7 @@ VALID = [
     pytest.param(lambda: ([0, 0, 1e308, 1e-100],) * 2, 1.0, id="thin-identical"),
     pytest.param(lambda: ([0, 0, 1e308, 1e-100], [0, 0, 1e308, 0.5e-100]), 0.5, id="thin-half"),
     pytest.param(lambda: ([-10, -10, 0, 0], [-10, -10, 0, -5]), 0.5, id="negative"),
-    pytest.param(
-        lambda: (_np("float64", [0, 0, 10, 10])(), A), 1.0, id="numpy-float64", marks=needs_numpy
-    ),
+    pytest.param(lambda: ((0, 0, 10, 10), [0.0, 0.0, 10.0, 5.0]), 0.5, id="exact-tuple-box"),
 ]
 INVALID = [
     pytest.param(lambda: [0, 0, True, 10], id="bool-True"),
@@ -146,6 +168,12 @@ INVALID = [
     pytest.param(lambda: [-math.inf, 0, 10, 10], id="-inf"),
     pytest.param(_np("int64", [0, 0, 10, 10]), id="numpy-int64", marks=needs_numpy),
     pytest.param(_np("float32", [0, 0, 10, 10]), id="numpy-float32", marks=needs_numpy),
+    pytest.param(_np("float64", [0, 0, 10, 10]), id="numpy-float64", marks=needs_numpy),
+    pytest.param(lambda: [0, 0, _FiniteFloat(10), 10], id="float-subclass-ratio-hook"),
+    pytest.param(lambda: [0, 0, _RaisingGtInt(10), 10], id="int-subclass-raising-gt"),
+    pytest.param(lambda: _HostileList([0, 0, 10, 10]), id="list-subclass-raising"),
+    pytest.param(lambda: _PlainTuple((0, 0, 10, 10)), id="tuple-subclass"),
+    pytest.param(lambda: [0, 0, _HostileFloat(10), 10], id="float-subclass-float-sub-hooks"),
     pytest.param(lambda: [0, 0, 10], id="3-values"),
     pytest.param(lambda: [0, 0, 10, 10, 1], id="5-values"),
     pytest.param(lambda: object(), id="object"),

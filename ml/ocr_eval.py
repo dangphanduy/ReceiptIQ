@@ -3,11 +3,15 @@
 Boxes are [x_min, y_min, x_max, y_max] pixels (OcrLine.bbox and SROIE `bboxes`).
 Pure Python on purpose: never import paddle, cv2 or datasets here.
 
-IoU input contract (closed on purpose): boxes come from JSON (OCR `bbox`) and SROIE `bboxes`,
-so a coordinate is a Python int (any size, not bool) or a finite float (float subclasses such as
-numpy.float64 included). Any other type (bool, Fraction, Decimal, complex, str, None, numpy
-int / float32 scalars), NaN, +-inf, a wrong length, a non-sequence, or x1 <= x0 / y1 <= y0
-makes the box INVALID, and its IoU is 0.0. iou() never raises.
+IoU input contract (closed on purpose): real boxes are exact built-ins (json.loads gives
+list/int/float for OCR `bbox`, SROIE via Arrow gives lists of int), so only those are accepted,
+checked by exact type before any method of the object is used:
+- box: type(box) is list or tuple, with exactly 4 coordinates (subclasses are INVALID);
+- coordinate: type(v) is int (any size; bool is not int by type) or type(v) is float and finite
+  (int/float subclasses such as numpy.float64, and every other type, are INVALID);
+- and x1 > x0, y1 > y0.
+Anything else is INVALID and has IoU 0.0; iou() never raises for any Python object.
+Callers: convert numpy/other numbers with int()/float() before calling.
 """
 
 import math
@@ -15,57 +19,47 @@ from collections.abc import Iterable, Mapping, Sequence
 from fractions import Fraction
 
 Box = Sequence[float]
+ExactBox = tuple[Fraction, Fraction, Fraction, Fraction]
 
 
-def _valid_coord(v: object) -> bool:
-    """int (any size) but not bool, or a finite float; see the module contract."""
-    if isinstance(v, bool):
-        return False
-    if isinstance(v, int):
-        return True  # never via math.isfinite: float(10**400) overflows
-    return isinstance(v, float) and math.isfinite(v)
+def _to_exact_box(box: object) -> ExactBox | None:
+    """The box as 4 exact Fractions if VALID (see the module contract), else None.
 
-
-def _coords(box: object) -> tuple | None:
-    """The 4 coordinates of a VALID box, read once; None for anything else, never raises.
-
-    Comparisons between ints and floats are exact, so validation needs no arithmetic.
+    Exact type checks come first, so no foreign method (len, getitem, comparison, as_integer_ratio)
+    ever runs. Fraction() of an exact int or float is exact, never rounds and never raises.
     """
-    try:
-        if len(box) != 4:
-            return None
-        c = (box[0], box[1], box[2], box[3])
-        if all(map(_valid_coord, c)) and c[2] > c[0] and c[3] > c[1]:
-            return c
-    except Exception:  # an odd object is INVALID, not an error
-        pass
-    return None
+    if type(box) not in (list, tuple) or len(box) != 4:
+        return None
+    for v in box:
+        if not (type(v) is int or (type(v) is float and math.isfinite(v))):
+            return None  # math.isfinite is only reached for exact floats, never for big ints
+    x0, y0, x1, y1 = (Fraction(v) for v in box)
+    return (x0, y0, x1, y1) if x1 > x0 and y1 > y0 else None
 
 
-def _iou_exact(a: Box, b: Box) -> Fraction:
-    """Exact IoU as a Fraction in [0, 1]; 0 if either box is INVALID or they do not overlap.
-
-    Fraction(int) and Fraction(float) are exact, so nothing can overflow or underflow.
-    """
-    ca, cb = _coords(a), _coords(b)
-    if ca is None or cb is None:
+def _iou_of_exact(a: ExactBox, b: ExactBox) -> Fraction:
+    """Exact IoU of two VALID boxes, in Fractions only."""
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    w = min(ax1, bx1) - max(ax0, bx0)
+    h = min(ay1, by1) - max(ay0, by0)
+    if w <= 0 or h <= 0:  # most pred x GT pairs do not touch
         return Fraction(0)
-    ax0, ay0, ax1, ay1 = ca
-    bx0, by0, bx1, by1 = cb
-    # Fast reject with exact comparisons only: most pred x GT pairs do not touch.
-    if min(ax1, bx1) <= max(ax0, bx0) or min(ay1, by1) <= max(ay0, by0):
-        return Fraction(0)
-    ax0, ay0, ax1, ay1 = map(Fraction, ca)
-    bx0, by0, bx1, by1 = map(Fraction, cb)
-    inter = (min(ax1, bx1) - max(ax0, bx0)) * (min(ay1, by1) - max(ay0, by0))
-    union = (ax1 - ax0) * (ay1 - ay0) + (bx1 - bx0) * (by1 - by0) - inter
-    return inter / union
+    inter = w * h
+    return inter / ((ax1 - ax0) * (ay1 - ay0) + (bx1 - bx0) * (by1 - by0) - inter)
+
+
+def _iou_exact(a: object, b: object) -> Fraction:
+    """Exact IoU as a Fraction in [0, 1]; 0 if either box is INVALID or they do not overlap."""
+    ea, eb = _to_exact_box(a), _to_exact_box(b)
+    return Fraction(0) if ea is None or eb is None else _iou_of_exact(ea, eb)
 
 
 def iou(a: Box, b: Box) -> float:
     """IoU in [0, 1], correctly rounded from the exact value; never raises.
 
     0.0 if either box is INVALID (see the module contract) or the boxes do not overlap.
+    Convert numpy/other numbers with int()/float() before calling.
     """
     return float(_iou_exact(a, b))
 
@@ -79,11 +73,14 @@ def match_greedy(
     index. Comparing Fractions means a true IoU just below the threshold never rounds into a
     match (Fraction vs float comparison is exact too).
     """
+    exact_preds = [_to_exact_box(b) for b in preds]  # convert each box once, not per pair
+    exact_gts = [_to_exact_box(b) for b in gts]
     pairs = [
         (score, p, g)
-        for p, pred in enumerate(preds)
-        for g, gt in enumerate(gts)
-        if (score := _iou_exact(pred, gt)) >= threshold and score > 0
+        for p, pred in enumerate(exact_preds)
+        if pred is not None
+        for g, gt in enumerate(exact_gts)
+        if gt is not None and (score := _iou_of_exact(pred, gt)) >= threshold and score > 0
     ]
     pairs.sort(key=lambda t: (-t[0], t[1], t[2]))
     used_p, used_g, matches = set(), set(), []
