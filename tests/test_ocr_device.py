@@ -41,9 +41,7 @@ def test_engine_versions_reports_installed_paddle_distribution(monkeypatch, inst
     }
 
 
-@pytest.mark.parametrize(
-    "installed", [{}, {"paddlepaddle": "3.3.1", "paddlepaddle-gpu": "3.3.1"}]
-)
+@pytest.mark.parametrize("installed", [{}, {"paddlepaddle": "3.3.1", "paddlepaddle-gpu": "3.3.1"}])
 def test_engine_versions_refuses_none_or_both_paddle_distributions(monkeypatch, installed):
     monkeypatch.setattr(engine_module, "version", fake_version(installed))
 
@@ -134,7 +132,14 @@ def test_baseline_cli_passes_device_to_engine_and_document(tmp_path, monkeypatch
 
     monkeypatch.setattr(baseline, "create_engine", fake_create_engine)
     monkeypatch.setattr(baseline, "run_ocr", fake_run_ocr)
-    argv = ["run_ocr_baseline.py", str(image), "--out-dir", str(tmp_path / "o"), "--device", "gpu:0"]
+    argv = [
+        "run_ocr_baseline.py",
+        str(image),
+        "--out-dir",
+        str(tmp_path / "o"),
+        "--device",
+        "gpu:0",
+    ]
     monkeypatch.setattr(sys, "argv", argv)
 
     baseline.main()

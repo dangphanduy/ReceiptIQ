@@ -1,8 +1,9 @@
-"""Run PaddleOCR 3.x (CPU) on ONE receipt image and write normalized JSON.
+"""Run PaddleOCR 3.x on ONE receipt image and write normalized JSON.
 
 Usage:
     python scripts/run_ocr_baseline.py data/samples/<key>.jpg
     python scripts/run_ocr_baseline.py path/to/receipt.jpg --out-dir outputs/ocr
+    python scripts/run_ocr_baseline.py data/samples/<key>.jpg --device gpu:0   # GPU env
 
 Output: <out-dir>/<image stem>.json (default out-dir `outputs/ocr`, git-ignored).
 Schema: see ml/ocr_schema.py. First run downloads PaddleOCR models to ~/.paddlex.
@@ -15,7 +16,7 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-from ml.ocr_engine import create_engine, run_ocr
+from ml.ocr_engine import create_engine, parse_device, run_ocr
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,6 +25,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("image", type=Path)
     parser.add_argument("--out-dir", type=Path, default=ROOT / "outputs" / "ocr")
+    parser.add_argument("--device", type=parse_device, default="cpu", help="cpu or gpu:<int>")
     args = parser.parse_args()
 
     try:
@@ -33,7 +35,7 @@ def main() -> None:
     except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
         sys.exit(f"cannot read image {args.image}: {exc}")
 
-    doc = run_ocr(create_engine(), image_bytes, str(args.image))
+    doc = run_ocr(create_engine(args.device), image_bytes, str(args.image), device=args.device)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     out_path = args.out_dir / f"{args.image.stem}.json"
