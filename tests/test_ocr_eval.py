@@ -33,6 +33,11 @@ def test_fractional_and_integer_coordinates_have_hand_computed_iou():
     assert iou(fractional, fractional) == 1.0
 
 
+def test_identical_large_finite_box_has_iou_one():
+    box = [0.0, 0.0, 1e308, 1e308]
+    assert iou(box, box) == 1.0
+
+
 @pytest.mark.parametrize(
     "bad",
     [[5, 5, 5, 9], [5, 5, 9, 5], [9, 0, 1, 10], [0, 0, 10], [0, 0, float("nan"), 10], []],
