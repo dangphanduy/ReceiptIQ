@@ -40,7 +40,14 @@ and do not train models, unless the user asks for that phase.
   - `--clone` reverts pip-upgraded packages to their conda versions (it reverted pyarrow 26 → 21,
     which fails to import, and brotlicffi 1.2 → 1.1). After cloning, diff
     `pip list --format=freeze` against Data-Science and pip-install (`--no-deps`) the
-    Data-Science versions. Expected differences: only `paddlepaddle-gpu` and the `nvidia-*-cu12` wheels.
+    Data-Science versions. After that, the only differences should be (checked 2026-11-16):
+    - only in Data-Science: `paddlepaddle==3.3.1`, `torch==2.6.0+cu124`,
+      `torchaudio==2.6.0+cu124`, `torchvision==0.21.0+cu124`
+    - only in riq-gpu: `paddlepaddle-gpu==3.3.1`, `nvidia-cublas-cu12==12.6.4.1`,
+      `nvidia-cuda-runtime-cu12==12.6.77`, `nvidia-cudnn-cu12==9.5.1.17`,
+      `nvidia-cufft-cu12==11.3.0.4`, `nvidia-curand-cu12==10.3.7.77`,
+      `nvidia-cusolver-cu12==11.7.1.2`, `nvidia-cusparse-cu12==12.5.4.2`,
+      `nvidia-nvjitlink-cu12==12.9.86`
   - Paddle warns "compiled with CUDNN 9.9, but CUDNN version in your machine is 9.5". That is the
     official wheel's own pin. On 5 test keys GPU and CPU text matched exactly anyway.
 
