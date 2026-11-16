@@ -5,8 +5,9 @@
 Get an off-the-shelf OCR number on SROIE before building anything on top of it.
 Later stages (field extraction, the MVP's confidence display) are measured against this.
 
-- Engine: PaddleOCR 3.x (`lang="en"` resolves to PP-OCRv6_medium det + rec in 3.7.0), CPU,
-  oneDNN off (see `OCR_CONFIG` in `ml/ocr_engine.py`), **no training or fine-tuning**.
+- Engine: PaddleOCR 3.x (`lang="en"` resolves to PP-OCRv6_medium det + rec in 3.7.0), CPU by
+  default or one NVIDIA GPU (`--device`, RIQ-57), oneDNN off (see `OCR_CONFIG` in
+  `ml/ocr_engine.py`), **no training or fine-tuning**.
 - Doc orientation, unwarping and text-line orientation models are disabled,
   because SROIE images are upright, flat scans.
 - Unit: text lines. PaddleOCR returns line-level boxes, and SROIE `words` are
@@ -21,7 +22,9 @@ Later stages (field extraction, the MVP's confidence display) are measured again
 {
   "schema_version": "1.0",
   "image": {"path": "...", "width": 463, "height": 605},
-  "engine": {"name": "paddleocr", "paddleocr_version": "...", "device": "cpu", "inference_seconds": 1.2},
+  "engine": {"name": "paddleocr", "paddleocr_version": "3.7.0",
+             "paddlepaddle_distribution": "paddlepaddle", "paddlepaddle_version": "3.3.1",
+             "lang": "en", "device": "cpu", "inference_seconds": 1.2},
   "num_lines": 35,
   "mean_confidence": 0.96,
   "lines": [
@@ -74,9 +77,38 @@ $PY scripts/run_ocr_batch.py --split test             # all 361 rows, ~3.5 h on 
 - `manifest.json` in the out-dir describes the **latest** run. It is overwritten on
   every run, so on a resumed run `processed` only counts that run. It contains:
   - SROIE `repo_id` and `revision` (the `commit_sha` from `data/sroie/manifest.json`)
-  - split, `limit`, the paddleocr and paddlepaddle versions, `OCR_CONFIG`
+  - split, `limit`, the paddleocr version, the paddle distribution and version,
+    `device`, `OCR_CONFIG`
   - `counts` (`processed` / `skipped` / `failed`), the failed keys with their errors
   - `started_at` / `finished_at` (UTC)
+
+### GPU and `--device` (RIQ-57)
+
+```bash
+$G scripts/run_ocr_batch.py --split test --device gpu:0 --out-dir outputs/ocr/test-gpu
+$G scripts/run_ocr_baseline.py data/samples/<key>.jpg --device gpu:0
+```
+
+- `$G` is the separate GPU env. It is cloned from the CPU env, with `paddlepaddle-gpu==3.3.1`
+  from the PaddlePaddle cu126 index and torch removed. The steps are in `CLAUDE.md` →
+  Environment. `pyproject.toml` still declares CPU `paddlepaddle`, the default.
+- `--device` is `cpu` (default) or `gpu:<int>`. Anything else is an argparse error.
+  `create_engine` refuses a GPU when paddle has no CUDA build or the GPU index does not exist,
+  so `engine.device` in each JSON and `ocr.device` in `manifest.json` name the device that ran.
+- `engine` / `ocr` also record `paddlepaddle_distribution` (`paddlepaddle` or
+  `paddlepaddle-gpu`). The field is additive, so `schema_version` stays `"1.0"`.
+- **No mixing.** Before loading the model, the batch reads `manifest.json` and every
+  `<key>.json` in `--out-dir`. If any of them came from another `device`, paddle distribution
+  or paddle version, it exits with an error asking for another `--out-dir` and writes nothing.
+  The `<key>.json` files are checked as well because a killed run leaves no manifest. Files from before RIQ-57
+  have no distribution field and count as `paddlepaddle`, since only the CPU build could
+  write them.
+- **GPU and CPU outputs may differ slightly.** They use different kernels, so float results are
+  not bit-identical. In a 5-key smoke test (first 5 test rows), line counts and every line's
+  text matched. Boxes differed by at most 1 px and confidences by at most 0.0034. Compare
+  numbers only between runs on the same device.
+- On the RTX 3050 Laptop (4 GB) used here, GPU inference was about 0.5 s/image against
+  15–31 s on CPU for the same 5 images, with about 1.2 GB VRAM in use during the run.
 
 ## Sanity check on 30 test samples (RIQ-17)
 
@@ -176,7 +208,10 @@ For `company`, `date`, `address`, `total`:
 ## Known limitations
 
 - Batch OCR exists, but metrics (detection, CER, field accuracy) are not implemented yet.
-- The batch runner is sequential, one image at a time on CPU.
+- The batch runner is sequential: one image per `predict` call, on CPU or a single GPU.
+- GPU and CPU outputs are not bit-identical (see RIQ-57 above). Keep them in separate out-dirs.
+- The GPU env only works without torch installed (cuDNN DLL clash on Windows). Paddle also
+  warns that the cu126 wheel was compiled with cuDNN 9.9 but ships `nvidia-cudnn-cu12` 9.5.
 - English models only. Vietnamese receipts are not supported or evaluated.
 - Numbers on SROIE only describe Malaysian scanned receipts (see [dataset.md](dataset.md)).
 - Output is not validated for accounting or tax use.

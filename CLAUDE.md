@@ -23,6 +23,26 @@ and do not train models, unless the user asks for that phase.
   (`ConvertPirAttribute2RuntimeAttribute`). About 18 s/image on CPU as a result.
 - `brotlicffi>=1.2` is required in that env, otherwise `huggingface_hub` downloads crash in
   `httpx2` with `unexpected keyword argument 'output_buffer_limit'`.
+- GPU env (RIQ-57): `E:\Anaconda\Enviroment\riq-gpu`, a clone of Data-Science with
+  `paddlepaddle-gpu==3.3.1` (cu126) instead of `paddlepaddle`. It is only for `--device gpu:N`
+  OCR runs; do not modify Data-Science for GPU work, and do not touch `pyproject.toml` deps
+  (CPU stays the declared default). Setup, in this order:
+  ```bash
+  conda create -y -p 'E:\Anaconda\Enviroment\riq-gpu' --clone 'E:\Anaconda\Enviroment\Data-Science'  # Windows paths; forward slashes fail
+  G=/e/Anaconda/Enviroment/riq-gpu/python.exe
+  $G -m pip uninstall -y paddlepaddle torch torchvision torchaudio
+  $G -m pip install paddlepaddle-gpu==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/  # never PyPI (stale 2.x)
+  $G -m pip install -e . --no-deps          # plain `-e .` would reinstall CPU paddlepaddle
+  $G -c "import paddle; paddle.utils.run_check()"
+  ```
+  - torch must go: its bundled cuDNN and paddle-gpu's `nvidia-cudnn-cu12` cannot both load
+    (WinError 127), and paddlex always imports torch via modelscope.
+  - `--clone` reverts pip-upgraded packages to their conda versions (it reverted pyarrow 26 → 21,
+    which fails to import, and brotlicffi 1.2 → 1.1). After cloning, diff
+    `pip list --format=freeze` against Data-Science and pip-install (`--no-deps`) the
+    Data-Science versions. Expected differences: only `paddlepaddle-gpu` and the `nvidia-*-cu12` wheels.
+  - Paddle warns "compiled with CUDNN 9.9, but CUDNN version in your machine is 9.5". That is the
+    official wheel's own pin. On 5 test keys GPU and CPU text matched exactly anyway.
 
 ## Commands
 
@@ -35,7 +55,16 @@ $PY scripts/download_sroie.py [--export-samples N] [--revision REV]   # ~1.1 GB 
 $PY scripts/run_ocr_baseline.py data/samples/<key>.jpg              # -> outputs/ocr/<key>.json
 $PY scripts/run_ocr_batch.py --split test [--limit N] [--out-dir D] # -> outputs/ocr/<split>/<key>.json + manifest.json; resumable
 $PY scripts/eda_sroie.py [--seed 42 --n 20]                         # train-split EDA -> outputs/eda/, see docs/eda.md
+
+G=/e/Anaconda/Enviroment/riq-gpu/python.exe        # GPU env, see Environment
+$G -m pytest                                        # tests must pass in both envs
+$G scripts/run_ocr_batch.py --split test --device gpu:0 [--out-dir D]   # ~0.5 s/image, ~1.2 GB VRAM
+$G scripts/run_ocr_baseline.py data/samples/<key>.jpg --device gpu:0
 ```
+
+`--device` is `cpu` (default) or `gpu:<int>`. A GPU device in the CPU env is a clear error,
+not a silent CPU fallback. The batch refuses an `--out-dir` holding results from another
+device or paddle distribution/version (see "No mixing" in `docs/baseline.md`).
 
 The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.paddlex/official_models`.
 
@@ -52,8 +81,10 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   checks split sizes (626 train / 361 test) only at that revision. Everything goes under `data/`
   (`hf_cache/`, `sroie/` via `save_to_disk` + `manifest.json`, `samples/`). If the pin changes,
   update `EXPECTED_SPLIT_SIZES` and `docs/dataset.md` too.
-- `ml/ocr_engine.py` holds `OCR_CONFIG`, `create_engine` (imports paddle lazily) and `run_ocr`
-  (encoded image bytes → OCR document). `run_ocr` decodes with `cv2.imdecode` like PaddleX does
+- `ml/ocr_engine.py` holds `OCR_CONFIG`, `create_engine(device)` (imports paddle lazily,
+  `paddleocr` before `paddle`, see the comment there) and `run_ocr(..., device=)`
+  (encoded image bytes → OCR document, records `engine.device`). `engine_versions()` reports
+  `paddlepaddle_distribution` (`paddlepaddle` or `paddlepaddle-gpu`) and its version. `run_ocr` decodes with `cv2.imdecode` like PaddleX does
   for a file path; do not switch it to PIL, which decodes JPEG differently and changes OCR output. Both OCR scripts use it; do not configure PaddleOCR anywhere else.
   `scripts/run_ocr_baseline.py` processes exactly one image. `scripts/run_ocr_batch.py` runs a
   split from `data/sroie`, skips keys that already have JSON (atomic tmp+rename writes) and keeps
