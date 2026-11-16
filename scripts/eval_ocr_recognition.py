@@ -7,8 +7,8 @@ Usage:
 Pairs are ml.ocr_eval.match_greedy matches (IoU >= --iou) between OCR lines and GT boxes; the
 GT text of bboxes[i] is words[i]. Same input contract as eval_ocr_detection.py: GT columns
 `key`, `words`, `bboxes`, `image_size` only (images are never decoded); keys without OCR JSON
-are listed in "missing_keys", never scored. GT splits lines at commas while OCR returns whole
-lines, so many pairs differ by segmentation, not recognition.
+are listed in "missing_keys", never scored. GT often uses several boxes per printed line;
+separately, some GT text is cut at the first comma even when its box spans the whole line.
 """
 
 import argparse

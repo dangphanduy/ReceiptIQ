@@ -49,10 +49,10 @@ def load_ocr(gt_rows: Iterable[Mapping], ocr_dir: Path, extract: Callable[[dict]
             schema, device = doc["schema_version"], doc["engine"]["device"]
             ocr_size = (doc["image"]["width"], doc["image"]["height"])
             extracted = extract(doc)
+            schemas.add(schema)
+            devices.add(device)
         except (json.JSONDecodeError, KeyError, TypeError, OSError) as exc:
             raise ValueError(f"{path}: malformed OCR JSON ({type(exc).__name__}: {exc})") from exc
-        schemas.add(schema)
-        devices.add(device)
         size = row["image_size"]
         if ocr_size != (size["width"], size["height"]):
             size_mismatch.append(key)
@@ -120,7 +120,7 @@ def resolve_device(ocr_dir: Path, devices: list[str]) -> str | None:
     return device
 
 
-def write_json_atomic(path: Path, obj) -> None:
+def write_json_atomic(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     try:

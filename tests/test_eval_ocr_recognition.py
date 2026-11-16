@@ -62,6 +62,20 @@ def test_evaluate_counts_empty_gt(tmp_path):
     assert result["exact_match_rate"] == 1.0
 
 
+def test_evaluate_image_with_no_matches_has_null_metrics(tmp_path):
+    write_ocr(tmp_path, "K1", [(B, "prediction")])
+
+    result = cli.evaluate([gt("K1", [(A, "ground truth")])], tmp_path, 0.5)
+
+    assert result["counts"] == {
+        "images_evaluated": 1, "missing": 0, "pairs": 0, "cer_pairs": 0,
+        "skipped_empty_gt": 0,
+    }  # fmt: skip
+    assert result["cer"] == {"mean": None, "median": None}
+    assert result["exact_match_rate"] is None
+    assert result["worst_lines"] == []
+
+
 def test_evaluate_flags_size_mismatch_but_still_scores(tmp_path):
     write_ocr(tmp_path, "K1", [(A, "x")], width=99)
 
@@ -103,6 +117,21 @@ def test_evaluate_refuses_mixed_schema(tmp_path):
 
     with pytest.raises(ValueError, match="schema"):
         cli.evaluate([gt("K1", [(A, "x")]), gt("K2", [(A, "x")])], tmp_path, 0.5)
+
+
+@pytest.mark.parametrize("field", ["schema_version", "device"])
+def test_evaluate_names_file_for_unhashable_ocr_metadata(tmp_path, field):
+    write_ocr(tmp_path, "K1", [(A, "x")])
+    path = tmp_path / "K1.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if field == "schema_version":
+        doc["schema_version"] = []
+    else:
+        doc["engine"]["device"] = []
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"K1\.json.*malformed OCR JSON"):
+        cli.evaluate([gt("K1", [(A, "x")])], tmp_path, 0.5)
 
 
 def test_evaluate_refuses_unsafe_key(tmp_path):
