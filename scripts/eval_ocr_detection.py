@@ -120,7 +120,7 @@ def resolve_device(ocr_dir: Path, devices: list[str]) -> str | None:
     return device
 
 
-def _write_json_atomic(path: Path, obj) -> None:
+def write_json_atomic(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -130,7 +130,8 @@ def _write_json_atomic(path: Path, obj) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _iou_threshold(value: str) -> float:
+def parse_iou_threshold(value: str) -> float:
+    """argparse type for --iou: a number in (0, 1]."""
     try:
         x = float(value)
     except ValueError:
@@ -145,7 +146,7 @@ def main() -> None:
     parser.add_argument("--split", choices=["train", "test"], default="test")
     parser.add_argument("--ocr-dir", type=Path, help="default: outputs/ocr/<split>/")
     parser.add_argument("--out", type=Path, help="default: outputs/eval/detection_<split>.json")
-    parser.add_argument("--iou", type=_iou_threshold, default=0.5, help="match if IoU >= this")
+    parser.add_argument("--iou", type=parse_iou_threshold, default=0.5, help="match if IoU >= this")
     args = parser.parse_args()
     ocr_dir = args.ocr_dir or ROOT / "outputs" / "ocr" / args.split
     out = args.out or ROOT / "outputs" / "eval" / f"detection_{args.split}.json"
@@ -167,7 +168,7 @@ def main() -> None:
         "ocr_device": device,
         **result,
     }
-    _write_json_atomic(out, report)
+    write_json_atomic(out, report)
     m, c = report["micro"], report["counts"]
 
     def fmt(v):

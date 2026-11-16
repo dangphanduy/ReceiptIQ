@@ -18,11 +18,11 @@ from pathlib import Path
 
 from eval_ocr_detection import (
     ROOT,
-    _iou_threshold,
-    _write_json_atomic,
     load_gt_rows,
     load_ocr,
+    parse_iou_threshold,
     resolve_device,
+    write_json_atomic,
 )
 
 from ml.ocr_recognition import line_pairs, summarize
@@ -54,6 +54,9 @@ def evaluate(gt_rows: Iterable[Mapping], ocr_dir: Path, iou_threshold: float) ->
         words, bboxes = row["words"], row["bboxes"]
         if len(words) != len(bboxes):
             raise ValueError(f"GT {row['key']}: {len(words)} words but {len(bboxes)} bboxes")
+        for i, w in enumerate(words):
+            if type(w) is not str:
+                raise ValueError(f"GT {row['key']}: words[{i}] is {type(w).__name__}, not str")
         pairs += line_pairs(row["key"], preds, list(zip(bboxes, words, strict=True)), iou_threshold)
     summary = summarize(pairs)
     return {
@@ -77,7 +80,7 @@ def main() -> None:
     parser.add_argument("--split", choices=["train", "test"], default="test")
     parser.add_argument("--ocr-dir", type=Path, help="default: outputs/ocr/<split>/")
     parser.add_argument("--out", type=Path, help="default: outputs/eval/recognition_<split>.json")
-    parser.add_argument("--iou", type=_iou_threshold, default=0.5, help="pair if IoU >= this")
+    parser.add_argument("--iou", type=parse_iou_threshold, default=0.5, help="pair if IoU >= this")
     args = parser.parse_args()
     ocr_dir = args.ocr_dir or ROOT / "outputs" / "ocr" / args.split
     out = args.out or ROOT / "outputs" / "eval" / f"recognition_{args.split}.json"
@@ -101,7 +104,7 @@ def main() -> None:
         "normalization": NORMALIZATION,
         **result,
     }
-    _write_json_atomic(out, report)
+    write_json_atomic(out, report)
     c, cer = report["counts"], report["cer"]
 
     def fmt(v):

@@ -43,7 +43,6 @@ def line_pairs(
     for p, g, score in match_greedy([b for b, _ in preds], [b for b, _ in gts], threshold):
         pred_text, gt_text = preds[p][1], gts[g][1]
         pn, gn = normalize_text(pred_text), normalize_text(gt_text)
-        dist = edit_distance(pn, gn)
         pairs.append(
             {
                 "key": key,
@@ -54,8 +53,8 @@ def line_pairs(
                 "pred_text": pred_text,
                 "gt_norm": gn,
                 "pred_norm": pn,
-                "edit_distance": dist,
-                "cer": dist / len(gn) if gn else None,  # undefined for an empty GT
+                "edit_distance": edit_distance(pn, gn),
+                "cer": line_cer(pred_text, gt_text),  # the one CER formula; None for empty GT
                 "exact": pn == gn,
             }
         )
