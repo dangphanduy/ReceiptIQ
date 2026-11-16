@@ -62,20 +62,41 @@ def test_parse_device_rejects_anything_else(value):
 
 @pytest.fixture
 def fake_paddle(monkeypatch):
-    """Fake paddle + paddleocr modules; returns (state, PaddleOCR calls)."""
-    state = {"cuda": True, "gpus": 1}
+    """Fake paddle + paddleocr modules; returns (state, PaddleOCR calls).
+
+    state["order"] records which module create_engine touched first.
+    """
+    state = {"cuda": True, "gpus": 1, "order": []}
     calls = []
+
+    def is_compiled_with_cuda():
+        state["order"].append("paddle")
+        return state["cuda"]
 
     paddle = types.ModuleType("paddle")
     paddle.device = types.SimpleNamespace(
-        is_compiled_with_cuda=lambda: state["cuda"],
+        is_compiled_with_cuda=is_compiled_with_cuda,
         cuda=types.SimpleNamespace(device_count=lambda: state["gpus"]),
     )
-    paddleocr = types.ModuleType("paddleocr")
-    paddleocr.PaddleOCR = lambda **kwargs: calls.append(kwargs) or "engine"
+
+    class FakePaddleOcrModule(types.ModuleType):
+        def __getattr__(self, name):  # runs on `from paddleocr import PaddleOCR`
+            if name != "PaddleOCR":  # import machinery probes __path__ etc.
+                raise AttributeError(name)
+            state["order"].append("paddleocr")
+            return lambda **kwargs: calls.append(kwargs) or "engine"
+
     monkeypatch.setitem(sys.modules, "paddle", paddle)
-    monkeypatch.setitem(sys.modules, "paddleocr", paddleocr)
+    monkeypatch.setitem(sys.modules, "paddleocr", FakePaddleOcrModule("paddleocr"))
     return state, calls
+
+
+def test_create_engine_imports_paddleocr_before_paddle(fake_paddle):
+    # Real failure (riq-gpu env): paddle-gpu first, then paddlex -> modelscope -> torch
+    # fails loading torch's cuDNN with WinError 127.
+    state, _ = fake_paddle
+    create_engine("gpu:0")
+    assert state["order"][:2] == ["paddleocr", "paddle"]
 
 
 @pytest.mark.parametrize("device", ["cpu", "gpu:0"])

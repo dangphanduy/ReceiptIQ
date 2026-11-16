@@ -72,6 +72,10 @@ def create_engine(device: str = "cpu") -> OcrEngine:
     """
     if not DEVICE.fullmatch(device):
         raise ValueError(f"device must be 'cpu' or 'gpu:<int>', got {device!r}")
+    # Keep this before `import paddle`: paddlex loads torch (via modelscope), and torch's
+    # cuDNN DLLs fail to load (WinError 127) once paddlepaddle-gpu has loaded its own.
+    from paddleocr import PaddleOCR
+
     if device != "cpu":
         import paddle
 
@@ -79,8 +83,6 @@ def create_engine(device: str = "cpu") -> OcrEngine:
             raise RuntimeError(f"{device} needs paddlepaddle-gpu; this env has the CPU build")
         if int(device.split(":")[1]) >= paddle.device.cuda.device_count():
             raise RuntimeError(f"{device} not found: {paddle.device.cuda.device_count()} GPU(s)")
-    from paddleocr import PaddleOCR
-
     return PaddleOCR(**OCR_CONFIG, device=device)
 
 
