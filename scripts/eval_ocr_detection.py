@@ -27,7 +27,8 @@ SAFE_KEY = re.compile(r"[\w.-]+", re.ASCII)  # same rule as run_ocr_batch.py
 def evaluate(gt_rows: Iterable[Mapping], ocr_dir: Path, iou_threshold: float) -> dict:
     """Match each GT row with <ocr_dir>/<key>.json; return counts, micro and per-image scores.
 
-    Raises ValueError for an unsafe key or OCR JSON with more than one schema_version or device.
+    Raises ValueError for an unsafe key, an unreadable or malformed <key>.json (naming the
+    file), or OCR JSON with more than one schema_version or device.
     """
     per_image, missing, size_mismatch = [], [], []
     schemas, devices = set(), set()
@@ -39,13 +40,19 @@ def evaluate(gt_rows: Iterable[Mapping], ocr_dir: Path, iou_threshold: float) ->
         if not path.exists():
             missing.append(key)
             continue
-        doc = json.loads(path.read_text(encoding="utf-8"))
-        schemas.add(doc["schema_version"])
-        devices.add(doc["engine"]["device"])
+        try:  # a broken file fails the run with its name; never skip a key silently
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            schema, device = doc["schema_version"], doc["engine"]["device"]
+            ocr_size = (doc["image"]["width"], doc["image"]["height"])
+            pred_boxes = [ln["bbox"] for ln in doc["lines"]]
+        except (json.JSONDecodeError, KeyError, TypeError, OSError) as exc:
+            raise ValueError(f"{path}: malformed OCR JSON ({type(exc).__name__}: {exc})") from exc
+        schemas.add(schema)
+        devices.add(device)
         size = row["image_size"]
-        if (doc["image"]["width"], doc["image"]["height"]) != (size["width"], size["height"]):
+        if ocr_size != (size["width"], size["height"]):
             size_mismatch.append(key)
-        counts = detection_counts([ln["bbox"] for ln in doc["lines"]], row["bboxes"], iou_threshold)
+        counts = detection_counts(pred_boxes, row["bboxes"], iou_threshold)
         per_image.append({"key": key, **counts, **scores(**counts)})
     if len(schemas) > 1:
         raise ValueError(f"OCR JSON in {ocr_dir} mixes schema versions {sorted(schemas)}")
@@ -106,6 +113,8 @@ def main() -> None:
         result = evaluate(rows, ocr_dir, args.iou)
     except ValueError as exc:
         sys.exit(str(exc))
+    if result["counts"]["evaluated"] == 0:  # e.g. only manifest.json / unrelated *.json
+        sys.exit(f"no OCR JSON for any {args.split} key in --ocr-dir {ocr_dir}; no report written")
 
     # The batch writes its manifest only at the end; until then every <key>.json names the device.
     ocr_manifest = ocr_dir / "manifest.json"

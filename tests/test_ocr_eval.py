@@ -33,9 +33,9 @@ def test_fractional_and_integer_coordinates_have_hand_computed_iou():
     assert iou(fractional, fractional) == 1.0
 
 
-def test_identical_large_finite_box_has_iou_one():
-    box = [0.0, 0.0, 1e308, 1e308]
-    assert iou(box, box) == 1.0
+def test_identical_box_with_overflowing_area_is_invalid_iou_zero():
+    box = [0.0, 0.0, 1e308, 1e308]  # finite coordinates, but width * height overflows to inf
+    assert iou(box, box) == 0.0
 
 
 @pytest.mark.parametrize(

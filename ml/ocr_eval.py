@@ -11,14 +11,19 @@ Box = Sequence[float]
 
 
 def _area(box: Box) -> float:
-    """Area of a valid box; 0.0 for anything malformed, inverted or degenerate."""
+    """Area of a valid box; 0.0 for anything malformed, inverted or degenerate.
+
+    A box whose area is not finite (e.g. width * height overflows to inf) is invalid too,
+    so iou() never computes inf / inf = NaN.
+    """
     try:
         if len(box) != 4 or not all(math.isfinite(v) for v in box):
             return 0.0
         x0, y0, x1, y1 = box
-        return (x1 - x0) * (y1 - y0) if x1 > x0 and y1 > y0 else 0.0
+        area = (x1 - x0) * (y1 - y0) if x1 > x0 and y1 > y0 else 0.0
     except (TypeError, ValueError, OverflowError):
         return 0.0
+    return area if math.isfinite(area) else 0.0
 
 
 def iou(a: Box, b: Box) -> float:
