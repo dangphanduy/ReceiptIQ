@@ -80,6 +80,16 @@ def test_evaluate_refuses_misaligned_gt(tmp_path):
         cli.evaluate([row], tmp_path, 0.5)
 
 
+@pytest.mark.parametrize("bad", [None, 5, b"x"])
+def test_evaluate_refuses_non_string_gt_word(tmp_path, bad):
+    write_ocr(tmp_path, "K1", [(A, "x"), (B, "y")])
+    row = gt("K1", [(A, "x"), (B, "y")])
+    row["words"][1] = bad
+
+    with pytest.raises(ValueError, match=r"K1.*1"):
+        cli.evaluate([row], tmp_path, 0.5)
+
+
 def test_evaluate_refuses_non_string_ocr_text(tmp_path):
     write_ocr(tmp_path, "K1", [(A, 5)])
 
