@@ -4,6 +4,7 @@ import math
 import random
 import subprocess
 import sys
+from decimal import Decimal
 from fractions import Fraction
 
 import pytest
@@ -93,6 +94,82 @@ def test_true_iou_just_below_threshold_never_matches_even_if_float_rounds_to_it(
 @pytest.mark.parametrize("bad", [[0, 0, True, 10], [False, 0, 10, 10]])
 def test_bool_coordinates_are_invalid(bad):
     assert iou(A, bad) == 0.0
+
+
+try:
+    import numpy as np
+except ImportError:  # numpy rows are skipped, the rest of the matrix still runs
+    np = None
+needs_numpy = pytest.mark.skipif(np is None, reason="numpy not installed")
+
+
+class _RaisingSequence:
+    """A 'box' whose item access blows up: iou() must still return 0.0."""
+
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, i):
+        raise RuntimeError("boom")
+
+
+def _np(kind, values):  # build numpy scalars lazily so collection works without numpy
+    return lambda: [getattr(np, kind)(v) for v in values]
+
+
+BIG = 10**400  # an int far beyond float range: valid, never converted to float
+VALID = [
+    pytest.param(lambda: (A, [5, 0, 15, 10]), 1 / 3, id="ints"),
+    pytest.param(lambda: ([0.0, 0.0, 10.0, 10.0], [0.0, 0.0, 10.0, 5.0]), 0.5, id="floats"),
+    pytest.param(lambda: (A, [0.0, 0.0, 10.0, 5.0]), 0.5, id="int-float-mix"),
+    pytest.param(lambda: ([0, 0, BIG, BIG], [0, 0, BIG, BIG]), 1.0, id="10**400-identical"),
+    pytest.param(lambda: ([0, 0, BIG, BIG], [0, 0, BIG, BIG // 2]), 0.5, id="10**400-half"),
+    pytest.param(lambda: ([0, 0, 1e308, 1e-100],) * 2, 1.0, id="thin-identical"),
+    pytest.param(lambda: ([0, 0, 1e308, 1e-100], [0, 0, 1e308, 0.5e-100]), 0.5, id="thin-half"),
+    pytest.param(lambda: ([-10, -10, 0, 0], [-10, -10, 0, -5]), 0.5, id="negative"),
+    pytest.param(
+        lambda: (_np("float64", [0, 0, 10, 10])(), A), 1.0, id="numpy-float64", marks=needs_numpy
+    ),
+]
+INVALID = [
+    pytest.param(lambda: [0, 0, True, 10], id="bool-True"),
+    pytest.param(lambda: [False, 0, 10, 10], id="bool-False"),
+    pytest.param(lambda: [0, 0, Fraction(BIG, 3), 10], id="Fraction-10**400/3"),
+    pytest.param(lambda: [0, 0, Fraction(1, 2), 10], id="Fraction-1/2"),
+    pytest.param(lambda: [0, 0, Decimal("1"), 10], id="Decimal"),
+    pytest.param(lambda: [0, 0, complex(1, 0), 10], id="complex"),
+    pytest.param(lambda: [0, 0, "1", 10], id="str"),
+    pytest.param(lambda: [0, 0, None, 10], id="None-coord"),
+    pytest.param(lambda: None, id="None-box"),
+    pytest.param(lambda: [0, 0, math.nan, 10], id="nan"),
+    pytest.param(lambda: [0, 0, math.inf, 10], id="inf"),
+    pytest.param(lambda: [-math.inf, 0, 10, 10], id="-inf"),
+    pytest.param(_np("int64", [0, 0, 10, 10]), id="numpy-int64", marks=needs_numpy),
+    pytest.param(_np("float32", [0, 0, 10, 10]), id="numpy-float32", marks=needs_numpy),
+    pytest.param(lambda: [0, 0, 10], id="3-values"),
+    pytest.param(lambda: [0, 0, 10, 10, 1], id="5-values"),
+    pytest.param(lambda: object(), id="object"),
+    pytest.param(lambda: 5, id="int-not-a-box"),
+    pytest.param(lambda: _RaisingSequence(), id="raising-sequence"),
+    pytest.param(lambda: [10, 0, 0, 10], id="inverted"),
+    pytest.param(lambda: [5, 0, 5, 10], id="zero-width"),
+]
+
+
+@pytest.mark.parametrize(("make", "expected"), VALID)
+def test_iou_contract_valid_boxes_give_exact_result(make, expected):
+    a, b = make()
+    assert iou(a, b) == expected
+    assert iou(b, a) == expected
+
+
+@pytest.mark.parametrize("make", INVALID)
+def test_iou_contract_invalid_box_gives_zero_as_a_or_b_and_never_raises(make):
+    bad = make()
+    assert iou(A, bad) == 0.0
+    assert iou(bad, A) == 0.0
+    assert iou(bad, bad) == 0.0
+    assert detection_counts([bad], [A]) == {"tp": 0, "fp": 1, "fn": 1}
 
 
 def _reference_iou(a, b):

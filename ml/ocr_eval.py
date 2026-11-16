@@ -2,54 +2,70 @@
 
 Boxes are [x_min, y_min, x_max, y_max] pixels (OcrLine.bbox and SROIE `bboxes`).
 Pure Python on purpose: never import paddle, cv2 or datasets here.
+
+IoU input contract (closed on purpose): boxes come from JSON (OCR `bbox`) and SROIE `bboxes`,
+so a coordinate is a Python int (any size, not bool) or a finite float (float subclasses such as
+numpy.float64 included). Any other type (bool, Fraction, Decimal, complex, str, None, numpy
+int / float32 scalars), NaN, +-inf, a wrong length, a non-sequence, or x1 <= x0 / y1 <= y0
+makes the box INVALID, and its IoU is 0.0. iou() never raises.
 """
 
 import math
-import numbers
 from collections.abc import Iterable, Mapping, Sequence
 from fractions import Fraction
 
 Box = Sequence[float]
 
 
-def _finite_real(v) -> bool:
-    if isinstance(v, bool) or not isinstance(v, numbers.Real):
+def _valid_coord(v: object) -> bool:
+    """int (any size) but not bool, or a finite float; see the module contract."""
+    if isinstance(v, bool):
         return False
-    return isinstance(v, numbers.Integral) or math.isfinite(v)  # isfinite(10**400) overflows
+    if isinstance(v, int):
+        return True  # never via math.isfinite: float(10**400) overflows
+    return isinstance(v, float) and math.isfinite(v)
 
 
-def _valid(box: Box) -> bool:
-    """Exactly 4 finite real numbers (bool rejected) with x1 > x0 and y1 > y0.
+def _coords(box: object) -> tuple | None:
+    """The 4 coordinates of a VALID box, read once; None for anything else, never raises.
 
-    Comparisons only, on the original values, so the check itself is exact.
+    Comparisons between ints and floats are exact, so validation needs no arithmetic.
     """
     try:
-        return len(box) == 4 and all(map(_finite_real, box)) and box[2] > box[0] and box[3] > box[1]
-    except TypeError:  # not a sequence
-        return False
+        if len(box) != 4:
+            return None
+        c = (box[0], box[1], box[2], box[3])
+        if all(map(_valid_coord, c)) and c[2] > c[0] and c[3] > c[1]:
+            return c
+    except Exception:  # an odd object is INVALID, not an error
+        pass
+    return None
 
 
 def _iou_exact(a: Box, b: Box) -> Fraction:
-    """Exact IoU as a Fraction in [0, 1]; 0 if either box is invalid or they do not overlap.
+    """Exact IoU as a Fraction in [0, 1]; 0 if either box is INVALID or they do not overlap.
 
-    Floats convert to Fraction exactly, so no width, area or union can overflow or underflow.
+    Fraction(int) and Fraction(float) are exact, so nothing can overflow or underflow.
     """
-    if not (_valid(a) and _valid(b)):
+    ca, cb = _coords(a), _coords(b)
+    if ca is None or cb is None:
         return Fraction(0)
+    ax0, ay0, ax1, ay1 = ca
+    bx0, by0, bx1, by1 = cb
     # Fast reject with exact comparisons only: most pred x GT pairs do not touch.
-    if min(a[2], b[2]) <= max(a[0], b[0]) or min(a[3], b[3]) <= max(a[1], b[1]):
+    if min(ax1, bx1) <= max(ax0, bx0) or min(ay1, by1) <= max(ay0, by0):
         return Fraction(0)
-    ax0, ay0, ax1, ay1 = map(Fraction, a)
-    bx0, by0, bx1, by1 = map(Fraction, b)
+    ax0, ay0, ax1, ay1 = map(Fraction, ca)
+    bx0, by0, bx1, by1 = map(Fraction, cb)
     inter = (min(ax1, bx1) - max(ax0, bx0)) * (min(ay1, by1) - max(ay0, by0))
     union = (ax1 - ax0) * (ay1 - ay0) + (bx1 - bx0) * (by1 - by0) - inter
     return inter / union
 
 
 def iou(a: Box, b: Box) -> float:
-    """Intersection over union in [0, 1], correctly rounded from the exact value (_iou_exact).
+    """IoU in [0, 1], correctly rounded from the exact value; never raises.
 
-    0.0 if either box is invalid: not exactly 4 finite real numbers, or x1 <= x0, or y1 <= y0.
+    0.0 if either box is INVALID (see the module contract) or the boxes do not overlap.
     """
     return float(_iou_exact(a, b))
 
