@@ -62,6 +62,7 @@ $PY scripts/download_sroie.py [--export-samples N] [--revision REV]   # ~1.1 GB 
 $PY scripts/run_ocr_baseline.py data/samples/<key>.jpg              # -> outputs/ocr/<key>.json
 $PY scripts/run_ocr_batch.py --split test [--limit N] [--out-dir D] # -> outputs/ocr/<split>/<key>.json + manifest.json; resumable
 $PY scripts/eda_sroie.py [--seed 42 --n 20]                         # train-split EDA -> outputs/eda/, see docs/eda.md
+$PY scripts/eval_ocr_detection.py --split test --ocr-dir outputs/ocr/test-gpu [--out F] [--iou 0.5]  # -> outputs/eval/detection_test.json
 
 G=/e/Anaconda/Enviroment/riq-gpu/python.exe        # GPU env, see Environment
 $G -m pytest                                        # tests must pass in both envs
@@ -95,8 +96,15 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   for a file path; do not switch it to PIL, which decodes JPEG differently and changes OCR output. Both OCR scripts use it; do not configure PaddleOCR anywhere else.
   `scripts/run_ocr_baseline.py` processes exactly one image. `scripts/run_ocr_batch.py` runs a
   split from `data/sroie`, skips keys that already have JSON (atomic tmp+rename writes) and keeps
-  going on per-image failures (exit 1 at the end). Evaluation and metrics are
-  planned in `docs/baseline.md` but not implemented yet. Use the test split (361) for evaluation.
+  going on per-image failures (exit 1 at the end). Use the test split (361) for evaluation.
+- `ml/ocr_eval.py` (RIQ-19) is pure-Python detection metrics: `iou`, greedy `match_greedy`
+  (IoU ≥ 0.5 inclusive, IoU desc, ties by pred/GT index), `scores` (null on a zero denominator),
+  `micro` (summed counts). Like `ocr_schema.py` it must not import paddle, cv2 or datasets.
+  `scripts/eval_ocr_detection.py` reads GT `key`/`bboxes`/`image_size` only; keys without OCR
+  JSON are listed as missing, never scored as all-FN. GT splits lines at commas while OCR returns
+  whole lines, so line-level IoU undercounts. CER / end-to-end / field metrics are not implemented yet.
+  The canonical full-test GPU output is `outputs/ocr/test-gpu/`; `outputs/ocr/test/` holds only a
+  stale 2-row CPU manifest from RIQ-18 (leave it).
   SROIE ground truth has typos (e.g. `X00016469670` address says `B1750`, receipt shows `81750`),
   so when OCR and ground truth disagree, look at the image before blaming the model.
 

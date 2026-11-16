@@ -109,6 +109,51 @@ $G scripts/run_ocr_baseline.py data/samples/<key>.jpg --device gpu:0
   numbers only between runs on the same device.
 - On the RTX 3050 Laptop (4 GB) used here, GPU inference was about 0.5 s/image against
   15–31 s on CPU for the same 5 images, with about 1.2 GB VRAM in use during the run.
+- The test split has 55 scans with a long side ≥ 4000 px (mostly 4961×7016, rows 183–343).
+  PaddleOCR resizes them to a 4000 px long side, and VRAM then reaches about 3.9 GB of 4 GB.
+  One full run on this card died at row 196 with no Python traceback (most likely GPU memory).
+  Rerunning the same command resumed and finished it. If that happens, rerun; do not switch
+  the out-dir to CPU.
+
+### Detection metrics (RIQ-19)
+
+```bash
+$PY scripts/eval_ocr_detection.py --split test --ocr-dir outputs/ocr/test-gpu
+#   [--out outputs/eval/detection_test.json] [--iou 0.5]
+```
+
+- Matching is in `ml/ocr_eval.py`, which is pure Python with no paddle / cv2 / datasets.
+  - OCR `lines[].bbox` and SROIE `bboxes` are both `[x0, y0, x1, y1]`.
+  - Every pred × GT pair with IoU ≥ threshold (inclusive, default 0.5) is a candidate.
+  - Candidates are taken by IoU descending, with ties broken by (pred index, GT index).
+  - Each pred and each GT box is matched at most once. Matched pairs are TP, leftover preds
+    are FP, and leftover GT boxes are FN.
+  - A malformed or zero-area box has IoU 0 with everything. The test split has one such GT
+    box, and it always counts as a FN.
+- Per image, P = TP/(TP+FP), R = TP/(TP+FN) and F1 = 2TP/(2TP+FP+FN). F1 equals the
+  harmonic mean of P and R when both exist. A zero denominator gives `null`, so an image
+  with no OCR lines has P = `null` and R = 0. P = R = 0 gives F1 = 0.0.
+- The `micro` scores come from TP/FP/FN summed over the split, not from averaging
+  per-image scores.
+- GT is read with only the `key`, `bboxes` and `image_size` columns, so images are never
+  decoded.
+- A key without `<key>.json` goes to `missing_keys` and is left out of the metrics. It is
+  never counted as all-FN, so a partial run can be scored, but only on the keys it covers.
+- If the OCR width/height differs from GT `image_size`, the key goes to
+  `size_mismatch_keys` but is still scored.
+- The report (written atomically) contains `iou_threshold`, `split`, `sroie_revision`
+  (from `data/sroie/manifest.json`), `ocr_dir`, `ocr_device` and `ocr_schema_version`.
+  It also has `counts` {`evaluated`, `missing`}, `micro` {tp, fp, fn, precision, recall,
+  f1}, the key lists and `per_image` rows.
+  - `ocr_device` comes from the OCR `manifest.json`. Before the batch has written one, it
+    comes from the per-key JSONs.
+  - OCR JSON that mixes schema versions or devices is refused.
+- **Caveat: line-level IoU undercounts.** GT often splits a printed line at commas or between
+  label and value (`NO 2 & 4` / `JALAN BAYU 4`, `INVOICE NO` / `: PEGIV-…`), while OCR returns
+  the whole printed line. That merged OCR box matches at most one GT part, so the other parts
+  become FN even though the text was read. Some FP come from handwriting
+  (e.g. a handwritten total), which SROIE GT does not annotate. Treat these scores as a
+  lower bound on detection quality, not as a SROIE Task 1 leaderboard number.
 
 ## Sanity check on 30 test samples (RIQ-17)
 
@@ -177,7 +222,10 @@ This confirms that an exact-match score against GT will undercount OCR quality.
 Text quoted above comes from SROIE ground truth and images. See the
 [attribution](dataset.md#attribution-cc-by-40).
 
-## How it will be measured (not yet implemented)
+## How it will be measured
+
+Detection (item 1 below) is implemented in RIQ-19. Everything else in this section is
+planned, not implemented yet.
 
 Evaluate on the **test split** only (361 images). Train is kept for later error analysis and tuning.
 
@@ -207,7 +255,14 @@ For `company`, `date`, `address`, `total`:
 
 ## Known limitations
 
-- Batch OCR exists, but metrics (detection, CER, field accuracy) are not implemented yet.
+- Detection metrics exist (RIQ-19). Recognition (CER), end-to-end and field-accuracy metrics
+  are not implemented yet.
+- Detection is scored at line level against GT boxes that often split one printed line, so
+  recall and precision are underestimated (see the RIQ-19 caveat above). There is no
+  word-level or polygon matching, and no Hungarian (optimal) assignment.
+- Handwriting and stamps are read by OCR but not annotated in SROIE GT, so they count as FP.
+- On a 4 GB GPU the largest scans use nearly all VRAM, and a run can die without a
+  traceback. Resuming works, but there is no automatic retry.
 - The batch runner is sequential: one image per `predict` call, on CPU or a single GPU.
 - GPU and CPU outputs are not bit-identical (see RIQ-57 above). Keep them in separate out-dirs.
 - The GPU env only works without torch installed (cuDNN DLL clash on Windows). Paddle also
