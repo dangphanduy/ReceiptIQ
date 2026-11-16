@@ -44,6 +44,10 @@ $PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu
   can die on the largest scans; rerun the same command to resume.
 - Canonical full test-split OCR output: `outputs/ocr/test-gpu/`. `outputs/ocr/test/` is a stale
   2-row CPU manifest from RIQ-18; leave it.
+- Known GT issues: (a) GT often splits one printed line into several boxes (label / value,
+  columns), which lowers line-level detection scores; (b) separately, many GT `words` are cut
+  at the first comma while the box covers the whole line, which inflates CER. `entities` are
+  not cut. (b) is an open data bug; see `docs/baseline.md` before interpreting text metrics.
 
 ## Coding and tests
 

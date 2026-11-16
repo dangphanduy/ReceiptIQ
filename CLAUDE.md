@@ -102,8 +102,9 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   (IoU ≥ 0.5 inclusive, IoU desc, ties by pred/GT index), `scores` (null on a zero denominator),
   `micro` (summed counts). Like `ocr_schema.py` it must not import paddle, cv2 or datasets.
   `scripts/eval_ocr_detection.py` reads GT `key`/`bboxes`/`image_size` only; keys without OCR
-  JSON are listed as missing, never scored as all-FN. GT splits lines at commas while OCR returns
-  whole lines, so line-level IoU undercounts.
+  JSON are listed as missing, never scored as all-FN. GT often splits one printed line into
+  several boxes (label / value, table columns; not at commas) while OCR returns whole lines, so
+  line-level IoU undercounts.
   The canonical full-test GPU output is `outputs/ocr/test-gpu/`; `outputs/ocr/test/` holds only a
   stale 2-row CPU manifest from RIQ-18 (leave it).
   SROIE ground truth has typos (e.g. `X00016469670` address says `B1750`, receipt shows `81750`),
@@ -114,8 +115,13 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   (CER / exact match on `match_greedy` pairs; empty normalized GT → CER None) and `summarize`.
   `scripts/eval_ocr_recognition.py` reuses `load_ocr` / `load_gt_rows` / `resolve_device` from
   `scripts/eval_ocr_detection.py` (same input contract) and reads GT `key`/`words`/`bboxes`/`image_size`.
-  Many GT `words` are cut at the first comma while the box spans the whole line, which inflates
-  CER. End-to-end (word-level) and field metrics are not implemented yet.
+  End-to-end (word-level) and field metrics are not implemented yet.
+- Open GT data bug (separate from box splitting): in both splits many GT `words` are cut at the
+  first comma while the box spans the whole printed line (GT `9` for `9, JALAN SUBANG JASA 3,`,
+  `1` for `1,007.50`); no `words` element contains a comma. It inflates CER and will affect
+  end-to-end metrics; `entities` are intact. Likely a converter that split `x1,…,y4,TEXT` on every
+  comma. Do not patch GT or change metric rules for it outside its bug ticket; see
+  "GT text cut at the first comma" in `docs/baseline.md`.
 
 ## Rules specific to this repo
 

@@ -148,10 +148,13 @@ $PY scripts/eval_ocr_detection.py --split test --ocr-dir outputs/ocr/test-gpu
   - `ocr_device` comes from the OCR `manifest.json`. Before the batch has written one, it
     comes from the per-key JSONs.
   - OCR JSON that mixes schema versions or devices is refused.
-- **Caveat: line-level IoU undercounts.** GT often splits a printed line at commas or between
-  label and value (`NO 2 & 4` / `JALAN BAYU 4`, `INVOICE NO` / `: PEGIV-…`), while OCR returns
-  the whole printed line. That merged OCR box matches at most one GT part, so the other parts
-  become FN even though the text was read. Some FP come from handwriting
+- **Caveat: line-level IoU undercounts.** GT often splits one printed line into several
+  boxes, between label and value or between columns (`INVOICE NO` / `: PEGIV-…`, quantity
+  `1` / amount `193.00`, `POS:` / `1`), while OCR returns the whole printed line. That merged
+  OCR box matches at most one GT part, so the other parts become FN even though the text was
+  read. These splits are not at commas. The separate comma problem (one box, text cut at the
+  first comma; see "GT text cut at the first comma" below) leaves the box intact, so it
+  barely affects detection. Some FP come from handwriting
   (e.g. a handwritten total), which SROIE GT does not annotate. Treat these scores as a
   lower bound on detection quality, not as a SROIE Task 1 leaderboard number.
 
@@ -180,12 +183,34 @@ $PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu
   `counts` {`images_evaluated`, `missing`, `pairs`, `cer_pairs`, `skipped_empty_gt`},
   `cer` {`mean`, `median`} over pairs, `exact_match_rate` and the 20 `worst_lines`
   (CER desc, ties by key and GT index). Any stat with an empty denominator is `null`.
-- **Caveat: segmentation, not recognition, dominates the worst lines.** Many GT `words`
-  are cut at the first comma while their box covers the whole printed line (e.g. GT `9`
-  for the printed `9, JALAN SUBANG JASA 3,`). OCR reads the full line, so the pair gets a
-  CER far above 1 although OCR read it correctly. These pairs pull the mean CER up
-  strongly; the median is much less affected. GT typos (see below) also count as OCR
-  errors. Check the image before calling a worst line a model error.
+- **Caveat: GT text cut at the first comma dominates the worst lines.** OCR reads the full
+  line, so such a pair gets a CER far above 1 although OCR read it correctly. These pairs
+  pull the mean CER up strongly; the median is much less affected. GT typos (see below) also
+  count as OCR errors. Check the image before calling a worst line a model error.
+
+### GT text cut at the first comma (open data bug)
+
+Two different GT problems were mixed up in earlier notes:
+
+- **(a) One printed line, several GT boxes.** Real annotation granularity: label and value,
+  or table columns, are separate boxes (`INVOICE NO` / `: PEGIV-…`, `POS:` / `1`). It hurts
+  line-level detection (see the RIQ-19 caveat). No case was found where GT splits a line at
+  a comma into two boxes.
+- **(b) One GT box over the whole printed line, text cut at the first comma.** The box is
+  right, but `words[i]` stops before the first comma and the rest is gone: GT `9` for the
+  printed `9, JALAN SUBANG JASA 3,`, GT `NO 2 & 4` for `NO 2 & 4, JALAN BAYU 4,` (this
+  example was earlier misread as (a)), GT `1` for the amount `1,007.50`. No GT `words`
+  element in either split contains a comma, while most address entities do. It hits
+  addresses most, but any line with a comma (amounts with a thousands separator, item
+  lines) can be cut. It affects every metric that uses `words` text (recognition now,
+  end-to-end later), on both splits.
+- `entities` (company/date/address/total, used by field evaluation) are not cut: address
+  entities keep their commas and the text the `words` lost, and a total like `1,007.50`
+  is intact.
+- Likely cause (hypothesis, not yet confirmed against the original SROIE box files): the
+  conversion to the HF copy split each original `x1,y1,…,x4,y4,TEXT` line on every comma and
+  kept only the first text field. Fixing GT is tracked as a separate bug; until then,
+  recognition numbers on this GT are pessimistic and the metric rules stay unchanged.
 
 ## Sanity check on 30 test samples (RIQ-17)
 
@@ -223,8 +248,10 @@ whether an extractor would choose it. That is harder than it sounds:
   - `&` read as `S` where a signature crosses the header (`X51005361908`).
   - A garbage character in `1x` next to a pen mark (`X51005442366`).
 - **Line segmentation, not recognition:**
-  - Most "unmatched" GT lines come from splitting differently. GT splits addresses at
-    commas (`NO 2 & 4` / `JALAN BAYU 4`), while OCR returns the whole printed line.
+  - Most "unmatched" GT lines come from splitting differently: GT has separate boxes for
+    label and value or for columns, while OCR returns the whole printed line. (This note
+    first cited `NO 2 & 4` / `JALAN BAYU 4` as a comma split; RIQ-20 showed that GT line is
+    one box whose text is cut at the comma. See "GT text cut at the first comma".)
   - OCR sometimes merges two GT boxes into one line
     (`Receipt No.: CS1803/28617 Date: 15/03/2018`).
   - OCR sometimes splits one printed row into fragments (`* RM 155.66 UNI (` + value),
@@ -289,8 +316,10 @@ For `company`, `date`, `address`, `total`:
 
 - Detection (RIQ-19) and recognition (RIQ-20: CER and line exact match on matched pairs)
   metrics exist. End-to-end (word-level) and field-accuracy metrics are not implemented yet.
-- Recognition is only scored on detection-matched pairs, so unmatched lines never reach it,
-  and GT lines cut at a comma inflate CER (see the RIQ-20 caveat above).
+- Recognition is only scored on detection-matched pairs, so unmatched lines never reach it.
+- GT `words` text is cut at the first comma on many lines in both splits (open data bug,
+  see "GT text cut at the first comma"). This inflates CER and will affect end-to-end
+  metrics; `entities` are not affected.
 - Detection is scored at line level against GT boxes that often split one printed line, so
   recall and precision are underestimated (see the RIQ-19 caveat above). There is no
   word-level or polygon matching, and no Hungarian (optimal) assignment.
