@@ -43,6 +43,16 @@ batch runner passes the original JPEG bytes stored in `data/sroie`. Note that
 `data/samples/*.jpg` are re-encoded copies (quality 95), so their OCR can differ slightly
 from the batch output for the same key.
 
+**Behaviour change for JPEGs with EXIF orientation (RIQ-18).** Before RIQ-18,
+`run_ocr_baseline.py` took `image.width` / `image.height` from PIL, which ignores EXIF
+orientation. PaddleX, however, OCR'd the image after `cv2` had already rotated it. For a
+rotated JPEG this recorded, for example, 40×30 while every box was in 30×40 coordinates.
+Both size and boxes now come from the same decoded (rotated) image, so `width` × `height`
+is the frame the boxes are measured in. This change is kept on purpose and covered by
+`test_exif_oriented_jpeg_records_rotated_size_matching_boxes`. It does not change any
+SROIE output: no image in the pinned train (626) or test (361) split has an EXIF
+orientation other than 1 (checked during RIQ-18).
+
 ### Batch over a split (RIQ-18)
 
 ```bash

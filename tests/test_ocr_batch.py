@@ -277,15 +277,29 @@ def test_run_ocr_decodes_like_paddlex_file_read(tmp_path):
     np.testing.assert_array_equal(engine.inputs[0], expected)
 
 
-def test_baseline_dimensions_are_unchanged_for_exif_oriented_jpeg():
+class FullFrameEngine:
+    """Returns one box spanning the whole array it was given, i.e. in decoded-image coords."""
+
+    def predict(self, arr):
+        h, w = arr.shape[:2]
+        poly = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]])
+        return [{"rec_texts": ["X"], "rec_scores": np.array([0.9]), "rec_polys": [poly]}]
+
+
+def test_exif_oriented_jpeg_records_rotated_size_matching_boxes():
+    # Deliberate: cv2 applies EXIF orientation, so size comes from the decoded (rotated)
+    # image the boxes refer to. The old baseline wrote PIL's unrotated size (40x30).
     exif = Image.Exif()
-    exif[274] = 6  # rotate 90 degrees clockwise when displayed
+    exif[274] = 6  # Orientation: rotate 90 degrees clockwise when displayed
     jpeg = encoded(Image.new("RGB", (40, 30), "white"), "JPEG", exif=exif)
 
-    doc = run_ocr(FakeEngine(), jpeg, "oriented.jpg")
+    doc = run_ocr(FullFrameEngine(), jpeg, "oriented.jpg")
 
-    assert doc["image"]["width"] == 40
-    assert doc["image"]["height"] == 30
+    width, height = doc["image"]["width"], doc["image"]["height"]
+    assert (width, height) == (30, 40)
+    for line in doc["lines"]:
+        x0, y0, x1, y1 = line["bbox"]
+        assert 0 <= x0 <= x1 <= width and 0 <= y0 <= y1 <= height
 
 
 def test_run_ocr_rejects_undecodable_bytes():

@@ -5,7 +5,9 @@ paddleocr is imported only inside `create_engine`, so `run_ocr` stays testable w
 """
 
 import time
+from collections.abc import Mapping, Sequence
 from importlib.metadata import version
+from typing import Protocol
 
 import cv2  # opencv-contrib-python, installed by paddleocr -> paddlex; never add another wheel
 import numpy as np
@@ -24,6 +26,14 @@ OCR_CONFIG = {
 }
 
 
+class OcrEngine(Protocol):
+    """What run_ocr needs from an engine: PaddleOCR 3.x, or a fake in tests."""
+
+    def predict(self, input: np.ndarray) -> Sequence[Mapping]:
+        """BGR uint8 HxWx3 image in; one dict-like result per image out."""
+        ...
+
+
 def engine_versions() -> dict:
     return {
         "paddleocr_version": version("paddleocr"),
@@ -31,20 +41,21 @@ def engine_versions() -> dict:
     }
 
 
-def create_engine():
+def create_engine() -> OcrEngine:
     """Build the PaddleOCR pipeline (slow: loads models). Build once, reuse per image."""
     from paddleocr import PaddleOCR
 
     return PaddleOCR(**OCR_CONFIG)
 
 
-def run_ocr(engine, image_bytes: bytes, image_path: str) -> dict:
+def run_ocr(engine: OcrEngine, image_bytes: bytes, image_path: str) -> dict:
     """OCR one encoded image (JPEG/PNG bytes) with `engine`; return the versioned OCR document.
 
     `image_path` is only recorded in the document, never opened.
     """
     # Decode exactly as PaddleX does for a file path (readers.py: cv2.imdecode, BGR).
     # PIL decodes JPEG differently, which would change OCR output vs. passing the file.
+    # IMREAD_COLOR applies EXIF orientation; width/height below match the boxes on purpose.
     bgr = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
     if bgr is None:
         raise ValueError(f"cannot decode image {image_path}")
