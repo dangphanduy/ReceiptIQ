@@ -24,12 +24,27 @@ def test_partial_overlap_iou():
     assert iou(A, [5, 0, 15, 10]) == pytest.approx(1 / 3)
 
 
+def test_fractional_and_integer_coordinates_have_hand_computed_iou():
+    # Each area is 16; intersection is 2.5 * 2.5 = 6.25; union is 25.75.
+    fractional, integer = [0.5, 0.5, 4.5, 4.5], [2, 2, 6, 6]
+    assert iou(fractional, integer) == pytest.approx(25 / 103)
+    assert iou(integer, fractional) == pytest.approx(25 / 103)
+    assert 0 <= iou(fractional, integer) <= 1
+    assert iou(fractional, fractional) == 1.0
+
+
 @pytest.mark.parametrize(
     "bad",
     [[5, 5, 5, 9], [5, 5, 9, 5], [9, 0, 1, 10], [0, 0, 10], [0, 0, float("nan"), 10], []],
     ids=["zero-width", "zero-height", "inverted", "three-values", "nan", "empty"],
 )
 def test_invalid_or_degenerate_box_gives_zero_not_crash(bad):
+    assert iou(A, bad) == 0.0
+    assert iou(bad, A) == 0.0
+
+
+@pytest.mark.parametrize("bad", [[0, 0, "bad", 10], None])
+def test_nonnumeric_or_nonsequence_box_gives_zero_not_crash(bad):
     assert iou(A, bad) == 0.0
     assert iou(bad, A) == 0.0
 
@@ -54,6 +69,12 @@ def test_no_overlap_is_one_fp_and_one_fn():
 
 def test_one_gt_two_preds_gives_one_tp_one_fp():
     assert detection_counts([A, [0, 0, 10, 9]], [A]) == {"tp": 1, "fp": 1, "fn": 0}
+
+
+def test_many_predictions_compete_for_one_gt():
+    preds = [A, A, A, A, A]
+    assert match_greedy(preds, [A]) == [(0, 0, 1.0)]
+    assert detection_counts(preds, [A]) == {"tp": 1, "fp": 4, "fn": 0}
 
 
 def test_one_pred_over_two_gts_gives_one_tp_one_fn():

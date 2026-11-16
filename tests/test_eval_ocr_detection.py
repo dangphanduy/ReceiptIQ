@@ -36,6 +36,17 @@ def test_keys_without_ocr_are_listed_not_counted_as_misses(tmp_path):
     assert [row["key"] for row in result["per_image"]] == ["K1"]
 
 
+def test_manifest_and_unrelated_json_are_ignored(tmp_path):
+    write_ocr(tmp_path, "K1", [A])
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "notes.json").write_text("{broken", encoding="utf-8")
+
+    result = cli.evaluate([gt("K1", [A]), gt("K2", [A])], tmp_path, 0.5)
+
+    assert result["counts"] == {"evaluated": 1, "missing": 1}
+    assert result["missing_keys"] == ["K2"]
+
+
 def test_per_image_rows(tmp_path):
     write_ocr(tmp_path, "K1", [A, [50, 0, 60, 10]])
 
@@ -156,6 +167,32 @@ def test_cli_refuses_ocr_dir_without_results(cli_env, monkeypatch):
 
     with pytest.raises(SystemExit, match="no OCR JSON"):
         run_cli(monkeypatch, "--ocr-dir", str(ocr_dir), "--out", str(out))
+    assert not out.exists()
+
+
+def test_cli_refuses_directory_with_only_non_key_json(cli_env, monkeypatch):
+    ocr_dir, out, _ = cli_env
+    ocr_dir.mkdir()
+    (ocr_dir / "manifest.json").write_text(
+        json.dumps({"ocr": {"device": "gpu:0"}}), encoding="utf-8"
+    )
+    (ocr_dir / "notes.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="no OCR JSON"):
+        run_cli(monkeypatch, "--ocr-dir", str(ocr_dir), "--out", str(out))
+
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("contents", ['{"schema_version": "1.0"}', "{broken"])
+def test_cli_refuses_malformed_ocr_json_with_key_context(cli_env, monkeypatch, contents):
+    ocr_dir, out, _ = cli_env
+    ocr_dir.mkdir()
+    (ocr_dir / "K1.json").write_text(contents, encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="K1.json"):
+        run_cli(monkeypatch, "--ocr-dir", str(ocr_dir), "--out", str(out))
+
     assert not out.exists()
 
 
