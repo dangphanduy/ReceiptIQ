@@ -19,7 +19,7 @@ and do not train models, unless the user asks for that phase.
 - Project is installed editable (`pip install -e ".[dev]"`), which is how `scripts/` can import `ml`.
 - Do not add `opencv-python` / `opencv-python-headless`. `paddleocr` → `paddlex` already
   installs `opencv-contrib-python`, and two OpenCV wheels clobber the same `cv2` package.
-- `run_ocr_baseline.py` sets `enable_mkldnn=False`. Paddle 3.3.1 oneDNN crashes on Windows CPU
+- `OCR_CONFIG` in `ml/ocr_engine.py` sets `enable_mkldnn=False`. Paddle 3.3.1 oneDNN crashes on Windows CPU
   (`ConvertPirAttribute2RuntimeAttribute`). About 18 s/image on CPU as a result.
 - `brotlicffi>=1.2` is required in that env, otherwise `huggingface_hub` downloads crash in
   `httpx2` with `unexpected keyword argument 'output_buffer_limit'`.
@@ -33,6 +33,7 @@ $PY -m pytest                                       # unit tests; never load the
 $PY -m pytest tests/test_ocr_schema.py::test_drops_blank_text
 $PY scripts/download_sroie.py [--export-samples N] [--revision REV]   # ~1.1 GB into data/
 $PY scripts/run_ocr_baseline.py data/samples/<key>.jpg              # -> outputs/ocr/<key>.json
+$PY scripts/run_ocr_batch.py --split test [--limit N] [--out-dir D] # -> outputs/ocr/<split>/<key>.json + manifest.json; resumable
 $PY scripts/eda_sroie.py [--seed 42 --n 20]                         # train-split EDA -> outputs/eda/, see docs/eda.md
 ```
 
@@ -51,7 +52,12 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   checks split sizes (626 train / 361 test) only at that revision. Everything goes under `data/`
   (`hf_cache/`, `sroie/` via `save_to_disk` + `manifest.json`, `samples/`). If the pin changes,
   update `EXPECTED_SPLIT_SIZES` and `docs/dataset.md` too.
-- `scripts/run_ocr_baseline.py` processes exactly one image. Evaluation and metrics are
+- `ml/ocr_engine.py` holds `OCR_CONFIG`, `create_engine` (imports paddle lazily) and `run_ocr`
+  (encoded image bytes → OCR document). `run_ocr` decodes with `cv2.imdecode` like PaddleX does
+  for a file path; do not switch it to PIL, which decodes JPEG differently and changes OCR output. Both OCR scripts use it; do not configure PaddleOCR anywhere else.
+  `scripts/run_ocr_baseline.py` processes exactly one image. `scripts/run_ocr_batch.py` runs a
+  split from `data/sroie`, skips keys that already have JSON (atomic tmp+rename writes) and keeps
+  going on per-image failures (exit 1 at the end). Evaluation and metrics are
   planned in `docs/baseline.md` but not implemented yet. Use the test split (361) for evaluation.
   SROIE ground truth has typos (e.g. `X00016469670` address says `B1750`, receipt shows `81750`),
   so when OCR and ground truth disagree, look at the image before blaming the model.

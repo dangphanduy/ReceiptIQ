@@ -6,7 +6,7 @@ Get an off-the-shelf OCR number on SROIE before building anything on top of it.
 Later stages (field extraction, the MVP's confidence display) are measured against this.
 
 - Engine: PaddleOCR 3.x (`lang="en"` resolves to PP-OCRv6_medium det + rec in 3.7.0), CPU,
-  oneDNN off (see the script), **no training or fine-tuning**.
+  oneDNN off (see `OCR_CONFIG` in `ml/ocr_engine.py`), **no training or fine-tuning**.
 - Doc orientation, unwarping and text-line orientation models are disabled,
   because SROIE images are upright, flat scans.
 - Unit: text lines. PaddleOCR returns line-level boxes, and SROIE `words` are
@@ -34,6 +34,49 @@ Later stages (field extraction, the MVP's confidence display) are measured again
 `bbox` is `[x_min, y_min, x_max, y_max]` in pixels, the same convention as SROIE
 `bboxes`. `confidence` is the recognition score. It is not calibrated and is not
 a probability that the text is correct.
+
+Both scripts get the PaddleOCR config (`OCR_CONFIG`) and the image → OCR document
+step (`run_ocr`) from `ml/ocr_engine.py`, so single-image and batch outputs cannot drift.
+`run_ocr` takes the encoded image bytes and decodes them the same way PaddleX decodes a
+file path (`cv2.imdecode`), so the same JPEG gives the same OCR from either script. The
+batch runner passes the original JPEG bytes stored in `data/sroie`. Note that
+`data/samples/*.jpg` are re-encoded copies (quality 95), so their OCR can differ slightly
+from the batch output for the same key.
+
+**Behaviour change for JPEGs with EXIF orientation (RIQ-18).** Before RIQ-18,
+`run_ocr_baseline.py` took `image.width` / `image.height` from PIL, which ignores EXIF
+orientation. PaddleX, however, OCR'd the image after `cv2` had already rotated it. For a
+rotated JPEG this recorded, for example, 40×30 while every box was in 30×40 coordinates.
+Both size and boxes now come from the same decoded (rotated) image, so `width` × `height`
+is the frame the boxes are measured in. This change is kept on purpose and covered by
+`test_exif_oriented_jpeg_records_rotated_size_matching_boxes`. It does not change any
+SROIE output: no image in the pinned train (626) or test (361) split has an EXIF
+orientation other than 1 (checked during RIQ-18).
+
+### Batch over a split (RIQ-18)
+
+```bash
+$PY scripts/run_ocr_batch.py --split test --limit 2   # first 2 rows of the test split
+$PY scripts/run_ocr_batch.py --split test             # all 361 rows, ~3.5 h on CPU
+```
+
+- Reads `data/sroie` with `load_from_disk` and writes one `<key>.json` per row (same
+  schema as above) to `--out-dir`, default `outputs/ocr/<split>/`. `image.path` is
+  `sroie:<split>/<key>`, because the image comes from the dataset and not from a file.
+- PaddleOCR is built once per run. `--limit N` takes the first N rows of the split.
+- **Resume:** a rerun skips every key whose `<key>.json` already exists. Each JSON is
+  written to `<key>.json.tmp` and then renamed. An interrupted run therefore leaves no
+  truncated `<key>.json`, and that key is OCR'd again next time. A leftover `.tmp` file
+  is overwritten. To redo a key, delete its JSON.
+- **Failures:** if one image fails, the key and the error are printed to stderr and
+  the run continues. At the end the failed keys are listed and the exit code is 1.
+  Failed keys have no JSON, so a rerun retries them.
+- `manifest.json` in the out-dir describes the **latest** run. It is overwritten on
+  every run, so on a resumed run `processed` only counts that run. It contains:
+  - SROIE `repo_id` and `revision` (the `commit_sha` from `data/sroie/manifest.json`)
+  - split, `limit`, the paddleocr and paddlepaddle versions, `OCR_CONFIG`
+  - `counts` (`processed` / `skipped` / `failed`), the failed keys with their errors
+  - `started_at` / `finished_at` (UTC)
 
 ## Sanity check on 30 test samples (RIQ-17)
 
@@ -132,7 +175,8 @@ For `company`, `date`, `address`, `total`:
 
 ## Known limitations
 
-- Single image per run. No batch evaluation yet.
+- Batch OCR exists, but metrics (detection, CER, field accuracy) are not implemented yet.
+- The batch runner is sequential, one image at a time on CPU.
 - English models only. Vietnamese receipts are not supported or evaluated.
 - Numbers on SROIE only describe Malaysian scanned receipts (see [dataset.md](dataset.md)).
 - Output is not validated for accounting or tax use.
