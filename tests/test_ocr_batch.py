@@ -1,8 +1,12 @@
 import io
 import json
+import sys
+import types
+from pathlib import Path
 
 import numpy as np
 import pytest
+import run_ocr_batch as batch_module
 from PIL import Image
 from run_ocr_batch import run_batch
 
@@ -16,9 +20,9 @@ DATASET_MANIFEST = {
 }
 
 
-def encoded(image, fmt="PNG"):
+def encoded(image, fmt="PNG", **save_kwargs):
     buf = io.BytesIO()
-    image.save(buf, format=fmt)
+    image.save(buf, format=fmt, **save_kwargs)
     return buf.getvalue()
 
 
@@ -79,6 +83,23 @@ def test_leftover_temp_file_is_not_treated_as_done(tmp_path):
     assert not (tmp_path / "A.json.tmp").exists()
 
 
+def test_keyboard_interrupt_during_write_leaves_no_partial_output(tmp_path, monkeypatch):
+    path = tmp_path / "A.json"
+    real_write_text = Path.write_text
+
+    def interrupting_write(self, data, **kwargs):
+        real_write_text(self, data[:5], **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Path, "write_text", interrupting_write)
+
+    with pytest.raises(KeyboardInterrupt):
+        batch_module._write_json_atomic(path, {"complete": True})
+
+    assert not path.exists()
+    assert not (tmp_path / "A.json.tmp").exists()
+
+
 def test_failure_is_logged_and_run_continues(tmp_path, capsys):
     manifest = batch(tmp_path, rows("A", "B", "C"), FakeOcr(fail_on={"B"}))
 
@@ -109,6 +130,90 @@ def test_limit_takes_first_n_rows(tmp_path):
 
     assert ocr.calls == ["A", "B"]
     assert not (tmp_path / "C.json").exists()
+
+
+def test_limit_zero_processes_no_rows(tmp_path):
+    ocr = FakeOcr()
+
+    manifest = batch(tmp_path, rows("A"), ocr, limit=0)
+
+    assert ocr.calls == []
+    assert manifest["counts"] == {"processed": 0, "skipped": 0, "failed": 0}
+
+
+def test_cli_rejects_limit_zero(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["run_ocr_batch.py", "--limit", "0"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        batch_module.main()
+
+    assert exc_info.value.code == 2
+    assert "must be >= 1" in capsys.readouterr().err
+
+
+def test_existing_out_dir_preserves_unrelated_files(tmp_path):
+    unrelated = tmp_path / "notes.txt"
+    unrelated.write_text("keep me", encoding="utf-8")
+
+    batch(tmp_path, rows("A"), FakeOcr())
+
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
+    assert (tmp_path / "A.json").exists()
+
+
+def test_cli_builds_one_engine_continues_and_exits_nonzero_on_failure(
+    tmp_path, monkeypatch, capsys
+):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "manifest.json").write_text(json.dumps(DATASET_MANIFEST), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    class FakeSplit(list):
+        def cast_column(self, name, feature):
+            return self
+
+    fake_datasets = types.ModuleType("datasets")
+    fake_datasets.Image = lambda **kwargs: kwargs
+    fake_datasets.load_from_disk = lambda path: {"test": FakeSplit(rows("A", "B", "C"))}
+    monkeypatch.setitem(sys.modules, "datasets", fake_datasets)
+
+    engine = object()
+    engine_builds = []
+
+    def fake_create_engine():
+        engine_builds.append(engine)
+        return engine
+
+    def fake_run_ocr(actual_engine, image_bytes, image_path):
+        assert actual_engine is engine
+        if image_path.endswith("/B"):
+            raise RuntimeError("broken image")
+        return {"schema_version": SCHEMA_VERSION, "image": {"path": image_path}, "lines": []}
+
+    monkeypatch.setattr(batch_module, "DATA_DIR", data_dir)
+    monkeypatch.setattr(batch_module, "create_engine", fake_create_engine)
+    monkeypatch.setattr(batch_module, "run_ocr", fake_run_ocr)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_ocr_batch.py", "--split", "test", "--limit", "3", "--out-dir", str(out_dir)],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        batch_module.main()
+
+    assert exc_info.value.code == 1
+    assert engine_builds == [engine]
+    assert (out_dir / "A.json").exists()
+    assert not (out_dir / "B.json").exists()
+    assert (out_dir / "C.json").exists()
+    assert json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))["counts"] == {
+        "processed": 2,
+        "skipped": 0,
+        "failed": 1,
+    }
+    assert "failed keys: B" in capsys.readouterr().err
 
 
 def test_manifest_contents(tmp_path):
@@ -170,6 +275,17 @@ def test_run_ocr_decodes_like_paddlex_file_read(tmp_path):
 
     expected = cv2.imdecode(np.frombuffer(path.read_bytes(), np.uint8), cv2.IMREAD_COLOR)
     np.testing.assert_array_equal(engine.inputs[0], expected)
+
+
+def test_baseline_dimensions_are_unchanged_for_exif_oriented_jpeg():
+    exif = Image.Exif()
+    exif[274] = 6  # rotate 90 degrees clockwise when displayed
+    jpeg = encoded(Image.new("RGB", (40, 30), "white"), "JPEG", exif=exif)
+
+    doc = run_ocr(FakeEngine(), jpeg, "oriented.jpg")
+
+    assert doc["image"]["width"] == 40
+    assert doc["image"]["height"] == 30
 
 
 def test_run_ocr_rejects_undecodable_bytes():
