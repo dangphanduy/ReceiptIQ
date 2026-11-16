@@ -1,5 +1,7 @@
 """Detection metrics on hand-made boxes. Boxes are [x0, y0, x1, y1] pixels."""
 
+import math
+import random
 import subprocess
 import sys
 
@@ -33,9 +35,43 @@ def test_fractional_and_integer_coordinates_have_hand_computed_iou():
     assert iou(fractional, fractional) == 1.0
 
 
-def test_identical_box_with_overflowing_area_is_invalid_iou_zero():
-    box = [0.0, 0.0, 1e308, 1e308]  # finite coordinates, but width * height overflows to inf
-    assert iou(box, box) == 0.0
+@pytest.mark.parametrize("m", [1e154, 1e308])
+def test_identical_huge_finite_box_has_iou_one(m):
+    # Unscaled, area (1e308^2) or union (2 * 1e154^2 - inter) overflows.
+    box = [0.0, 0.0, m, m]
+    assert iou(box, box) == 1.0
+
+
+def test_coordinates_spanning_the_float_range_do_not_overflow():
+    # Unscaled, x1 - x0 = 2e308 is already inf before any multiplication.
+    big = [-1e308, -1e308, 1e308, 1e308]
+    half = [0.0, -1e308, 1e308, 1e308]
+    assert iou(big, big) == 1.0
+    assert iou(big, half) == pytest.approx(0.5)
+
+
+def test_iou_properties_on_random_boxes_of_any_magnitude():
+    rng = random.Random(0)
+
+    def box(scale):
+        x0, x1 = sorted(rng.uniform(-scale, scale) for _ in range(2))
+        y0, y1 = sorted(rng.uniform(-scale, scale) for _ in range(2))
+        assert x1 > x0 and y1 > y0
+        return [x0, y0, x1, y1]
+
+    overlapping = 0
+    for _ in range(500):
+        scale = 10.0 ** rng.uniform(-3, 300)
+        a, b = box(scale), box(scale)
+        value = iou(a, b)
+        assert 0.0 <= value <= 1.0  # also false for NaN
+        assert iou(b, a) == value
+        assert iou(a, a) == 1.0
+        for k in (-40, -1, 1, 13):
+            scaled = ([math.ldexp(v, k) for v in a], [math.ldexp(v, k) for v in b])
+            assert iou(*scaled) == value
+        overlapping += value > 0
+    assert overlapping > 100  # the overlap branch is exercised, not only disjoint pairs
 
 
 @pytest.mark.parametrize(

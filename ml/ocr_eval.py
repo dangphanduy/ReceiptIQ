@@ -10,29 +10,37 @@ from collections.abc import Iterable, Mapping, Sequence
 Box = Sequence[float]
 
 
-def _area(box: Box) -> float:
-    """Area of a valid box; 0.0 for anything malformed, inverted or degenerate.
-
-    A box whose area is not finite (e.g. width * height overflows to inf) is invalid too,
-    so iou() never computes inf / inf = NaN.
-    """
+def _valid(box: Box) -> bool:
+    """Exactly 4 finite numbers with x1 > x0 and y1 > y0 (comparisons only, no arithmetic)."""
     try:
-        if len(box) != 4 or not all(math.isfinite(v) for v in box):
-            return 0.0
-        x0, y0, x1, y1 = box
-        area = (x1 - x0) * (y1 - y0) if x1 > x0 and y1 > y0 else 0.0
+        return (
+            len(box) == 4
+            and all(math.isfinite(v) for v in box)
+            and box[2] > box[0]
+            and box[3] > box[1]
+        )
     except (TypeError, ValueError, OverflowError):
-        return 0.0
-    return area if math.isfinite(area) else 0.0
+        return False
 
 
 def iou(a: Box, b: Box) -> float:
-    """Intersection over union; 0.0 if either box is invalid or has zero area."""
-    area_a, area_b = _area(a), _area(b)
-    if not area_a or not area_b:
+    """Intersection over union in [0, 1]; 0.0 if either box is invalid (see _valid).
+
+    Both boxes are first scaled by the same power of two so the largest |coordinate| lies in
+    [0.5, 1). IoU is scale-invariant and power-of-two scaling is exact in binary floating point,
+    so pixel-box results are bit-identical to unscaled arithmetic and nothing can overflow.
+    """
+    if not (_valid(a) and _valid(b)):
         return 0.0
-    w = min(a[2], b[2]) - max(a[0], b[0])
-    h = min(a[3], b[3]) - max(a[1], b[1])
+    e = math.frexp(max(abs(v) for v in (*a, *b)))[1]
+    ax0, ay0, ax1, ay1 = (math.ldexp(v, -e) for v in a)
+    bx0, by0, bx1, by1 = (math.ldexp(v, -e) for v in b)
+    area_a = (ax1 - ax0) * (ay1 - ay0)
+    area_b = (bx1 - bx0) * (by1 - by0)
+    if area_a <= 0 or area_b <= 0:  # a box far smaller than the other can underflow to 0
+        return 0.0
+    w = min(ax1, bx1) - max(ax0, bx0)
+    h = min(ay1, by1) - max(ay0, by0)
     inter = w * h if w > 0 and h > 0 else 0.0
     return inter / (area_a + area_b - inter)
 
