@@ -14,8 +14,9 @@ import json
 import os
 import re
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
+from typing import Any
 
 from ml.ocr_eval import detection_counts, micro, scores
 
@@ -24,13 +25,16 @@ DATA_DIR = ROOT / "data" / "sroie"
 SAFE_KEY = re.compile(r"[\w.-]+", re.ASCII)  # same rule as run_ocr_batch.py
 
 
-def evaluate(gt_rows: Iterable[Mapping], ocr_dir: Path, iou_threshold: float) -> dict:
-    """Match each GT row with <ocr_dir>/<key>.json; return counts, micro and per-image scores.
+def load_ocr(gt_rows: Iterable[Mapping], ocr_dir: Path, extract: Callable[[dict], Any]) -> dict:
+    """Pair each GT row with extract(<ocr_dir>/<key>.json); shared by the detection and
+    recognition evals.
 
-    Raises ValueError for an unsafe key, an unreadable or malformed <key>.json (naming the
-    file), or OCR JSON with more than one schema_version or device.
+    Returns {"images": [(row, extracted)], "ocr_schema_version", "ocr_devices", "missing_keys",
+    "size_mismatch_keys"}. Keys without OCR JSON are listed, never paired. Raises ValueError
+    for an unsafe key, an unreadable or malformed <key>.json (naming the file; extract runs
+    inside that check), or OCR JSON with more than one schema_version or device.
     """
-    per_image, missing, size_mismatch = [], [], []
+    images, missing, size_mismatch = [], [], []
     schemas, devices = set(), set()
     for row in gt_rows:
         key = row["key"]
@@ -44,32 +48,79 @@ def evaluate(gt_rows: Iterable[Mapping], ocr_dir: Path, iou_threshold: float) ->
             doc = json.loads(path.read_text(encoding="utf-8"))
             schema, device = doc["schema_version"], doc["engine"]["device"]
             ocr_size = (doc["image"]["width"], doc["image"]["height"])
-            pred_boxes = [ln["bbox"] for ln in doc["lines"]]
+            extracted = extract(doc)
+            schemas.add(schema)
+            devices.add(device)
         except (json.JSONDecodeError, KeyError, TypeError, OSError) as exc:
             raise ValueError(f"{path}: malformed OCR JSON ({type(exc).__name__}: {exc})") from exc
-        schemas.add(schema)
-        devices.add(device)
         size = row["image_size"]
         if ocr_size != (size["width"], size["height"]):
             size_mismatch.append(key)
-        counts = detection_counts(pred_boxes, row["bboxes"], iou_threshold)
-        per_image.append({"key": key, **counts, **scores(**counts)})
+        images.append((row, extracted))
     if len(schemas) > 1:
         raise ValueError(f"OCR JSON in {ocr_dir} mixes schema versions {sorted(schemas)}")
     if len(devices) > 1:
         raise ValueError(f"OCR JSON in {ocr_dir} mixes devices {sorted(devices)}")
     return {
+        "images": images,
         "ocr_schema_version": next(iter(schemas), None),
         "ocr_devices": sorted(devices),
-        "counts": {"evaluated": len(per_image), "missing": len(missing)},
-        "micro": micro(per_image),
         "missing_keys": missing,
         "size_mismatch_keys": size_mismatch,
+    }
+
+
+def evaluate(gt_rows: Iterable[Mapping], ocr_dir: Path, iou_threshold: float) -> dict:
+    """Match each GT row with <ocr_dir>/<key>.json; return counts, micro and per-image scores.
+
+    Raises ValueError as load_ocr does.
+    """
+    loaded = load_ocr(gt_rows, ocr_dir, lambda doc: [ln["bbox"] for ln in doc["lines"]])
+    per_image = []
+    for row, pred_boxes in loaded["images"]:
+        counts = detection_counts(pred_boxes, row["bboxes"], iou_threshold)
+        per_image.append({"key": row["key"], **counts, **scores(**counts)})
+    return {
+        "ocr_schema_version": loaded["ocr_schema_version"],
+        "ocr_devices": loaded["ocr_devices"],
+        "counts": {"evaluated": len(per_image), "missing": len(loaded["missing_keys"])},
+        "micro": micro(per_image),
+        "missing_keys": loaded["missing_keys"],
+        "size_mismatch_keys": loaded["size_mismatch_keys"],
         "per_image": per_image,
     }
 
 
-def _write_json_atomic(path: Path, obj) -> None:
+def load_gt_rows(split: str, columns: list[str], ocr_dir: Path) -> tuple[Any, str]:
+    """(GT rows with only `columns`, SROIE revision); exits if data or OCR JSON is missing.
+
+    select_columns keeps the image column out, so images are never decoded.
+    """
+    dataset_manifest_path = DATA_DIR / "manifest.json"
+    if not dataset_manifest_path.exists():
+        sys.exit(f"{dataset_manifest_path} not found; run scripts/download_sroie.py first")
+    if not any(p.name != "manifest.json" for p in ocr_dir.glob("*.json")):
+        sys.exit(f"no OCR JSON in {ocr_dir}; run scripts/run_ocr_batch.py first")
+    revision = json.loads(dataset_manifest_path.read_text(encoding="utf-8"))["commit_sha"]
+
+    from datasets import load_from_disk
+
+    return load_from_disk(str(DATA_DIR))[split].select_columns(columns), revision
+
+
+def resolve_device(ocr_dir: Path, devices: list[str]) -> str | None:
+    """The OCR device, from the batch manifest if present; exits if it contradicts the JSON."""
+    # The batch writes its manifest only at the end; until then every <key>.json names the device.
+    ocr_manifest = ocr_dir / "manifest.json"
+    if not ocr_manifest.exists():
+        return devices[0] if devices else None
+    device = json.loads(ocr_manifest.read_text(encoding="utf-8"))["ocr"]["device"]
+    if devices and devices != [device]:
+        sys.exit(f"{ocr_manifest} says device {device}, but OCR JSON says {devices}")
+    return device
+
+
+def write_json_atomic(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -79,7 +130,8 @@ def _write_json_atomic(path: Path, obj) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _iou_threshold(value: str) -> float:
+def parse_iou_threshold(value: str) -> float:
+    """argparse type for --iou: a number in (0, 1]."""
     try:
         x = float(value)
     except ValueError:
@@ -94,37 +146,19 @@ def main() -> None:
     parser.add_argument("--split", choices=["train", "test"], default="test")
     parser.add_argument("--ocr-dir", type=Path, help="default: outputs/ocr/<split>/")
     parser.add_argument("--out", type=Path, help="default: outputs/eval/detection_<split>.json")
-    parser.add_argument("--iou", type=_iou_threshold, default=0.5, help="match if IoU >= this")
+    parser.add_argument("--iou", type=parse_iou_threshold, default=0.5, help="match if IoU >= this")
     args = parser.parse_args()
     ocr_dir = args.ocr_dir or ROOT / "outputs" / "ocr" / args.split
     out = args.out or ROOT / "outputs" / "eval" / f"detection_{args.split}.json"
 
-    dataset_manifest_path = DATA_DIR / "manifest.json"
-    if not dataset_manifest_path.exists():
-        sys.exit(f"{dataset_manifest_path} not found; run scripts/download_sroie.py first")
-    if not any(p.name != "manifest.json" for p in ocr_dir.glob("*.json")):
-        sys.exit(f"no OCR JSON in {ocr_dir}; run scripts/run_ocr_batch.py first")
-    revision = json.loads(dataset_manifest_path.read_text(encoding="utf-8"))["commit_sha"]
-
-    from datasets import load_from_disk
-
-    rows = load_from_disk(str(DATA_DIR))[args.split].select_columns(["key", "bboxes", "image_size"])
+    rows, revision = load_gt_rows(args.split, ["key", "bboxes", "image_size"], ocr_dir)
     try:
         result = evaluate(rows, ocr_dir, args.iou)
     except ValueError as exc:
         sys.exit(str(exc))
     if result["counts"]["evaluated"] == 0:  # e.g. only manifest.json / unrelated *.json
         sys.exit(f"no OCR JSON for any {args.split} key in --ocr-dir {ocr_dir}; no report written")
-
-    # The batch writes its manifest only at the end; until then every <key>.json names the device.
-    ocr_manifest = ocr_dir / "manifest.json"
-    devices = result.pop("ocr_devices")
-    if ocr_manifest.exists():
-        device = json.loads(ocr_manifest.read_text(encoding="utf-8"))["ocr"]["device"]
-        if devices and devices != [device]:
-            sys.exit(f"{ocr_manifest} says device {device}, but OCR JSON says {devices}")
-    else:
-        device = devices[0] if devices else None
+    device = resolve_device(ocr_dir, result.pop("ocr_devices"))
 
     report = {
         "iou_threshold": args.iou,
@@ -134,7 +168,7 @@ def main() -> None:
         "ocr_device": device,
         **result,
     }
-    _write_json_atomic(out, report)
+    write_json_atomic(out, report)
     m, c = report["micro"], report["counts"]
 
     def fmt(v):
