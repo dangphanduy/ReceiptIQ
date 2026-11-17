@@ -282,9 +282,11 @@ Question: can OCR line confidence flag lines for user review in the MVP, and fro
   (`ml.ocr_confidence.is_comma_cut`): the normalized OCR text has a comma and its part before
   the first comma, stripped, equals the normalized GT (see "GT text cut at the first comma").
   On test-gpu it removes 862 of 17,645 pairs, all of them wrong by construction.
-- **Threshold grid** 0.50…0.99 step 0.01, plus 0.995 and 0.999. The candidate is the max-F1
-  row, ties to the lower t. The report keeps the whole sweep, so another operating point can
-  be read from it without rerunning.
+- **Threshold grid** 0.50…0.99 step 0.01, plus 0.990…0.999 step 0.001 (most lines sit there),
+  59 values in total. The candidate is the max-F1 row, ties to the lower t. Each view also has
+  a **budget** point: the highest t that flags at most 15% of lines (`null` if none). The
+  report keeps the whole sweep, so another operating point can be read from it without
+  rerunning.
 - **Latency** = `engine.inference_seconds` (`predict()` only; decode and model load excluded),
   for `--ocr-dir` and for `--latency-dir` (optional; `null` if it has no OCR JSON). Stats: n,
   mean, median, p95, min, max. **p95 is nearest-rank**: the ⌈0.95·n⌉-th smallest value, no
@@ -299,10 +301,14 @@ Question: can OCR line confidence flag lines for user review in the MVP, and fro
 - The chart (Pillow, no matplotlib) shows the share of each class per bin: one `< 0.80` bin,
   then 0.01 bins up to 1.00, with the candidate threshold as a dashed line and the SROIE
   CC BY 4.0 credit.
-- **Candidate threshold (clean view): t = 0.995**, precision 0.31, recall 0.64 (F1 0.42),
-  flagging 31.6% of lines (all view: P 0.37, R 0.62). **Verdict:** confidence is a weak but
-  real signal, good enough to rank lines for review in the MVP but not to be the only review
-  gate, because most wrong lines also have high confidence.
+- **Candidate threshold (clean view): t = 0.993**, precision 0.33, recall 0.60 (F1 0.42),
+  flagging 28.4% of lines (all view: t = 0.996, P 0.36, R 0.64, flags 34.7%). **Verdict:**
+  confidence is a weak but real signal, good enough to rank lines for review in the MVP but not
+  to be the only review gate, because most wrong lines also have high confidence.
+- **Tight review budget:** the budget point is t = 0.97 in both views (clean: P 0.41, R 0.29,
+  flags 10.7%). It flags fewer lines with higher precision but misses most wrong lines. The
+  next grid step, 0.98, already flags more than 15%. The final operating point belongs to the
+  MVP field-level confidence (RIQ-28).
 - Calibration and field-level confidence are out of scope (RIQ-49, RIQ-28). The full results
   table belongs to RIQ-23.
 
@@ -440,10 +446,15 @@ For `company`, `date`, `address`, `total`:
   not comparable with the SROIE Task 2 leaderboard (see the RIQ-21 section).
 - Recognition is only scored on detection-matched pairs, so unmatched lines never reach it.
   The same holds for the confidence analysis (RIQ-22).
-- CPU latency (RIQ-22) is a 40-image sample (first 40 test rows) on this one machine; it is
-  not a full-split or cross-hardware benchmark.
+- CPU latency (RIQ-22) is a 40-image sample (first 40 test rows) on this one machine, measured
+  while short pytest/ruff runs happened now and then. It is not a full-split or cross-hardware
+  benchmark. p95 at n = 40 is unstable: 51.9 s, or 62.3 s without the first image. Treat the
+  CPU numbers as indicative.
 - The comma-cut filter behind the `clean` confidence view is a heuristic: it can drop a real
-  OCR error that looks like a cut, and it misses cut GT that does not fit the pattern.
+  OCR error that looks like a cut, and it misses cut GT that does not fit the pattern. It also
+  leaves other GT artefacts in place: e.g. `X51005677327` GT `ROUNDING :` has the colon far right
+  in the same box, and OCR reads `Rounding` correctly at confidence 1.000. Such pairs count as
+  wrong, so the precision for "line is wrong" is pessimistic.
 - GT `words` text is cut at the first comma on many lines in both splits (open data bug,
   see "GT text cut at the first comma"). This inflates CER and end-to-end FP; `entities` are
   not affected.
