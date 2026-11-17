@@ -262,6 +262,50 @@ does the same):
 So these numbers are close to Task 2 in spirit but are **not** comparable with the SROIE
 Task 2 leaderboard.
 
+### Latency and confidence (RIQ-22)
+
+```bash
+$PY scripts/run_ocr_batch.py --split test --limit 40 --device cpu --out-dir outputs/ocr/test-cpu-latency
+$PY scripts/eval_ocr_confidence.py --split test
+#   [--ocr-dir outputs/ocr/test-gpu] [--latency-dir outputs/ocr/test-cpu-latency]
+#   [--out outputs/eval/confidence_test.json] [--chart outputs/eval/confidence_hist_test.png] [--iou 0.5]
+```
+
+Question: can OCR line confidence flag lines for user review in the MVP, and from which threshold?
+
+- **Line** = a detection-matched pair from `ml.ocr_recognition.line_pairs` (IoU ≥ 0.5, same
+  matching and normalization as recognition). Its confidence is the OCR line's `confidence`;
+  it is **wrong** when `exact` is false. Rule: flag if confidence < t. Positive class = wrong
+  line, so precision = share of flagged lines that are wrong, recall = share of wrong lines that
+  get flagged. Unmatched OCR lines and missed GT boxes are not in this analysis.
+- **Two views.** `all` = every pair. `clean` = all minus suspected GT comma-cuts
+  (`ml.ocr_confidence.is_comma_cut`): the normalized OCR text has a comma and its part before
+  the first comma, stripped, equals the normalized GT (see "GT text cut at the first comma").
+  On test-gpu it removes 862 of 17,645 pairs, all of them wrong by construction.
+- **Threshold grid** 0.50…0.99 step 0.01, plus 0.995 and 0.999. The candidate is the max-F1
+  row, ties to the lower t. The report keeps the whole sweep, so another operating point can
+  be read from it without rerunning.
+- **Latency** = `engine.inference_seconds` (`predict()` only; decode and model load excluded),
+  for `--ocr-dir` and for `--latency-dir` (optional; `null` if it has no OCR JSON). Stats: n,
+  mean, median, p95, min, max. **p95 is nearest-rank**: the ⌈0.95·n⌉-th smallest value, no
+  interpolation. The CPU sample is the **first 40 test rows** (split order) on this machine
+  (`enable_mkldnn=False`), with nothing else heavy running (only short unit-test runs).
+- **Warm-up.** The first image of a fresh process can include warm-up, so each latency block
+  also has `first_image_seconds` and `stats_excluding_first`. In the CPU sample the first image
+  (24.6 s) was below the mean, so warm-up did not show. `outputs/ocr/test-gpu/` was written by
+  several resumed runs, so there its first image is not the only one after a warm-up.
+- GPU confidences are used for the analysis; RIQ-57 showed CPU and GPU confidences differ by
+  ≤ 0.0034.
+- The chart (Pillow, no matplotlib) shows the share of each class per bin: one `< 0.80` bin,
+  then 0.01 bins up to 1.00, with the candidate threshold as a dashed line and the SROIE
+  CC BY 4.0 credit.
+- **Candidate threshold (clean view): t = 0.995**, precision 0.31, recall 0.64 (F1 0.42),
+  flagging 31.6% of lines (all view: P 0.37, R 0.62). **Verdict:** confidence is a weak but
+  real signal, good enough to rank lines for review in the MVP but not to be the only review
+  gate, because most wrong lines also have high confidence.
+- Calibration and field-level confidence are out of scope (RIQ-49, RIQ-28). The full results
+  table belongs to RIQ-23.
+
 ### GT text cut at the first comma (open data bug)
 
 Two different GT problems were mixed up in earlier notes:
@@ -395,6 +439,11 @@ For `company`, `date`, `address`, `total`:
 - End-to-end word scores use the HF copy's `words` as GT and score every token, so they are
   not comparable with the SROIE Task 2 leaderboard (see the RIQ-21 section).
 - Recognition is only scored on detection-matched pairs, so unmatched lines never reach it.
+  The same holds for the confidence analysis (RIQ-22).
+- CPU latency (RIQ-22) is a 40-image sample (first 40 test rows) on this one machine; it is
+  not a full-split or cross-hardware benchmark.
+- The comma-cut filter behind the `clean` confidence view is a heuristic: it can drop a real
+  OCR error that looks like a cut, and it misses cut GT that does not fit the pattern.
 - GT `words` text is cut at the first comma on many lines in both splits (open data bug,
   see "GT text cut at the first comma"). This inflates CER and end-to-end FP; `entities` are
   not affected.
