@@ -125,7 +125,8 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   `ml/ocr_confidence.py` (RIQ-22) is pure-Python (no paddle, cv2, datasets or PIL):
   `latency_stats` (p95 nearest-rank via `percentile`), `is_comma_cut` (suspected GT comma-cut
   pair), `histogram`, `threshold_sweep` over `THRESHOLDS` (flag if confidence < t, positive =
-  wrong line, reuses `ml.ocr_e2e.prf1`) and `pick_threshold` (max F1, ties to lower t).
+  wrong line, reuses `ml.ocr_e2e.prf1`), `pick_threshold` (max F1, ties to lower t) and
+  `pick_budget` (highest t flagging ≤ a share of lines; the CLI uses 15%).
   `scripts/eval_ocr_confidence.py` runs it on `line_pairs` with the same loaders, reports
   latency for `--ocr-dir` and the optional `--latency-dir` CPU sample, and draws the chart with
   Pillow inside the script (never add matplotlib).
