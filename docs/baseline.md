@@ -291,7 +291,8 @@ Question: can OCR line confidence flag lines for user review in the MVP, and fro
   for `--ocr-dir` and for `--latency-dir` (optional; `null` if it has no OCR JSON). Stats: n,
   mean, median, p95, min, max. **p95 is nearest-rank**: the ⌈0.95·n⌉-th smallest value, no
   interpolation. The CPU sample is the **first 40 test rows** (split order) on this machine
-  (`enable_mkldnn=False`), with nothing else heavy running (only short unit-test runs).
+  (`enable_mkldnn=False`). No other OCR or heavy job ran, but short pytest/ruff runs happened
+  now and then during the sample (see Known limitations).
 - **Warm-up.** The first image of a fresh process can include warm-up, so each latency block
   also has `first_image_seconds` and `stats_excluding_first`. In the CPU sample the first image
   (24.6 s) was below the mean, so warm-up did not show. `outputs/ocr/test-gpu/` was written by

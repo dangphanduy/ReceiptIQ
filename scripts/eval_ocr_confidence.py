@@ -1,8 +1,8 @@
 """OCR latency and line confidence on a SROIE split: can confidence flag wrong lines for review?
 
-Usage:
-    python scripts/eval_ocr_confidence.py --split test
-    python scripts/eval_ocr_confidence.py --split test --ocr-dir outputs/ocr/test-gpu \
+Usage ($PY = the env's interpreter, see AGENTS.md; never bare `python`):
+    $PY scripts/eval_ocr_confidence.py --split test
+    $PY scripts/eval_ocr_confidence.py --split test --ocr-dir outputs/ocr/test-gpu \
         --latency-dir outputs/ocr/test-cpu-latency --out outputs/eval/confidence_test.json \
         --chart outputs/eval/confidence_hist_test.png --iou 0.5
 
