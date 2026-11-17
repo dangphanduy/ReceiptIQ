@@ -117,13 +117,13 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   `scripts/eval_ocr_recognition.py` reuses `load_ocr` / `load_gt_rows` / `resolve_device` from
   `scripts/eval_ocr_detection.py` (same input contract) and reads GT `key`/`words`/`bboxes`/`image_size`.
   `ml/ocr_e2e.py` (RIQ-21) is pure-Python word-level P/R/F1: `normalize_text` tokens split on
-  whitespace, `Counter` intersection per image, `micro_prf1` over summed counts, and 0.0 (not None,
-  unlike `ocr_eval.scores`) on a zero denominator. `scripts/eval_ocr_e2e.py` uses the same loaders,
+  whitespace, `Counter` intersection per image, `micro_prf1` over summed counts, and None
+  (JSON `null`) on a zero denominator. `scripts/eval_ocr_e2e.py` uses the same loaders,
   reads GT `key`/`words`/`image_size`. Field metrics are not implemented yet.
 - Open GT data bug (separate from box splitting): in both splits many GT `words` are cut at the
   first comma while the box spans the whole printed line (GT `9` for `9, JALAN SUBANG JASA 3,`,
   `1` for `1,007.50`); no `words` element contains a comma. It inflates CER and will affect
-  end-to-end FP; `entities` are intact. Likely a converter that split `x1,…,y4,TEXT` on every
+  end-to-end metrics; `entities` are intact. Likely a converter that split `x1,…,y4,TEXT` on every
   comma. Do not patch GT or change metric rules for it outside its bug ticket; see
   "GT text cut at the first comma" in `docs/baseline.md`.
 

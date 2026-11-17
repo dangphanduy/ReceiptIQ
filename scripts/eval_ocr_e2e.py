@@ -8,7 +8,7 @@ Per image, all OCR line texts and all GT `words` are normalized (ml.text_norm), 
 whitespace and matched as a multiset; boxes are not used. Same input contract as
 eval_ocr_detection.py: GT columns `key`, `words`, `image_size` only (images are never
 decoded); keys without OCR JSON are listed in "missing_keys", never scored. Some GT `words`
-are cut at the first comma (see docs/baseline.md), which shows up here as FP.
+are cut at the first comma (see docs/baseline.md), which can increase FP.
 """
 
 import argparse
@@ -23,7 +23,7 @@ from ml.ocr_e2e import micro_prf1, prf1, word_counts
 GT_COLUMNS = ["key", "words", "image_size"]
 NORMALIZATION = (
     "ml.text_norm.normalize_text, then split on whitespace: uppercase, no punctuation removal; "
-    "tokens matched as a multiset per image; P/R/F1 are 0.0 on a zero denominator"
+    "tokens matched as a multiset per image; each zero-denominator metric is null"
 )
 
 
@@ -59,6 +59,10 @@ def evaluate(gt_rows: Iterable[Mapping], ocr_dir: Path) -> dict:
     }
 
 
+def _score_text(value: float | None) -> str:
+    return "null" if value is None else f"{value:.4f}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--split", choices=["train", "test"], default="test")
@@ -91,7 +95,8 @@ def main() -> None:
     print(
         f"evaluated {c['evaluated']}, missing {c['missing']}, "
         f"size mismatch {len(report['size_mismatch_keys'])} | words: "
-        f"P {m['precision']:.4f} R {m['recall']:.4f} F1 {m['f1']:.4f} "
+        f"P {_score_text(m['precision'])} R {_score_text(m['recall'])} "
+        f"F1 {_score_text(m['f1'])} "
         f"(TP {m['tp']} FP {m['fp']} FN {m['fn']}) -> {out}"
     )
 

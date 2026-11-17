@@ -31,15 +31,15 @@ def word_counts(pred_texts: Iterable[str], gt_texts: Iterable[str]) -> dict:
 
 
 def prf1(tp: int, fp: int, fn: int) -> dict:
-    """P = TP/(TP+FP), R = TP/(TP+FN), F1 = 2TP/(2TP+FP+FN); 0.0 where a denominator is 0.
+    """P = TP/(TP+FP), R = TP/(TP+FN), F1 = 2TP/(2TP+FP+FN).
 
-    Zero-denominator rule: every value is a float, never None, and never raises. No predicted
-    tokens gives P = 0.0, no GT tokens gives R = 0.0, and both empty gives P = R = F1 = 0.0.
-    This differs on purpose from ml.ocr_eval.scores (detection), which returns None there.
+    Return None for each ratio with a zero denominator, as in ml.ocr_eval.scores.
+    No predicted tokens gives P = None; no GT tokens gives R = None; both empty gives
+    P = R = F1 = None. Counts stay unchanged.
     """
 
-    def ratio(num: int, den: int) -> float:
-        return num / den if den else 0.0
+    def ratio(num: int, den: int) -> float | None:
+        return num / den if den else None
 
     return {
         "precision": ratio(tp, tp + fp),
@@ -51,7 +51,7 @@ def prf1(tp: int, fp: int, fn: int) -> dict:
 def micro_prf1(per_image: Iterable[Mapping]) -> dict:
     """tp/fp/fn summed over all images first, then prf1 (not a mean of per-image F1).
 
-    No images gives all counts 0 and P = R = F1 = 0.0 (see prf1).
+    No images gives all counts 0 and P = R = F1 = None (see prf1).
     """
     totals = {"tp": 0, "fp": 0, "fn": 0}
     for counts in per_image:

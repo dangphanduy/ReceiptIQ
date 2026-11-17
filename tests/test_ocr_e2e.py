@@ -29,26 +29,30 @@ def test_case_and_whitespace_are_normalized():
     assert word_counts(["total  rm"], ["TOTAL RM"]) == {"tp": 2, "fp": 0, "fn": 0}
 
 
+def test_unicode_tokens_are_counted_without_filtering():
+    assert word_counts(["Café 東京"], ["CAFÉ 東京"]) == {"tp": 2, "fp": 0, "fn": 0}
+
+
 def test_exact_match():
     counts = word_counts(["TOTAL 9.00"], ["TOTAL 9.00"])
     assert counts == {"tp": 2, "fp": 0, "fn": 0}
     assert prf1(**counts) == {"precision": 1.0, "recall": 1.0, "f1": 1.0}
 
 
-def test_empty_prediction_scores_zero():
+def test_empty_prediction_has_undefined_precision():
     counts = word_counts([], ["TOTAL 9.00"])
     assert counts == {"tp": 0, "fp": 0, "fn": 2}
-    assert prf1(**counts) == {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+    assert prf1(**counts) == {"precision": None, "recall": 0.0, "f1": 0.0}
 
 
-def test_empty_gt_scores_zero():
+def test_empty_gt_has_undefined_recall():
     counts = word_counts(["TOTAL 9.00"], [" "])
     assert counts == {"tp": 0, "fp": 2, "fn": 0}
-    assert prf1(**counts) == {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+    assert prf1(**counts) == {"precision": 0.0, "recall": None, "f1": 0.0}
 
 
-def test_both_empty_scores_zero():
-    assert prf1(0, 0, 0) == {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+def test_both_empty_has_all_metrics_undefined():
+    assert prf1(0, 0, 0) == {"precision": None, "recall": None, "f1": None}
 
 
 def test_prf1_values():
@@ -57,6 +61,8 @@ def test_prf1_values():
 
 
 def test_micro_sums_counts_before_ratios():
+    # K1: TP 1, FP 0, FN 0, F1 1; K2: TP 0, FP 3, FN 1, F1 0.
+    # Combined: TP 1, FP 3, FN 1, so micro F1 = 2/(2+3+1) = 1/3; mean F1 = 1/2.
     per_image = [
         {"key": "K1", **word_counts(["A"], ["A"])},  # F1 1.0
         {"key": "K2", **word_counts(["X Y Z"], ["B"])},  # F1 0.0
@@ -70,7 +76,7 @@ def test_micro_sums_counts_before_ratios():
     assert result["f1"] != pytest.approx(mean_f1)
 
 
-def test_micro_of_no_images_scores_zero():
+def test_micro_of_no_images_has_all_metrics_undefined():
     assert micro_prf1([]) == {
-        "tp": 0, "fp": 0, "fn": 0, "precision": 0.0, "recall": 0.0, "f1": 0.0
+        "tp": 0, "fp": 0, "fn": 0, "precision": None, "recall": None, "f1": None
     }  # fmt: skip

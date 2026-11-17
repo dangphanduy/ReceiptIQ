@@ -204,9 +204,9 @@ $PY scripts/eval_ocr_e2e.py --split test --ocr-dir outputs/ocr/test-gpu
   FN = GT tokens − TP. Pred `A A B` vs GT `A B B` gives TP 2, FP 1, FN 1.
 - `micro` sums TP/FP/FN over the split first and then takes the ratios; it is not the mean of
   per-image F1. `per_image` rows carry each image's tp/fp/fn/precision/recall/f1.
-- **Zero-denominator rule: 0.0, never `null`.** No predicted tokens gives P = 0.0, no GT
-  tokens gives R = 0.0, both gives P = R = F1 = 0.0. This differs on purpose from detection
-  and recognition above, which report `null` for an empty denominator.
+- **Zero-denominator rule: `null`.** No predicted tokens gives P = `null`, no GT tokens
+  gives R = `null`, and both empty gives P = R = F1 = `null`. Other defined ratios remain
+  numeric, including 0.0 when the numerator is zero. This matches detection's convention.
 - Same input contract and provenance as detection (`missing_keys`, `size_mismatch_keys`, mixed
   schema/device refused, malformed JSON fails naming the file, non-str OCR text or GT word
   refused, atomic write). GT columns read: `key`, `words`, `image_size` only. The report has
@@ -215,16 +215,19 @@ $PY scripts/eval_ocr_e2e.py --split test --ocr-dir outputs/ocr/test-gpu
   and `per_image`. There is no `--iou`, because no box matching is involved.
 - **Caveat: comma-truncated GT text turns correct OCR words into FP** (see "GT text cut at the
   first comma"). No GT `words` element contains a comma, so every predicted token with a comma
-  is a FP, and the words after a cut comma are missing from GT, so they are FP too. On the
-  full test split (`outputs/ocr/test-gpu`), 1,308 of the 39,963 predicted tokens contain a
-  comma, against 6,166 FP in total. Precision on this GT is therefore pessimistic.
+  is a FP. Words after a cut comma may also become FP when they have no other matching GT
+  occurrence in that image. On the full test split (`outputs/ocr/test-gpu`), 1,308 of 39,963
+  predicted tokens contain a comma, against 6,166 FP in total. This GT can make precision
+  pessimistic.
 
 #### Differences from the official SROIE Task 2 protocol
 
-Source for the official side: the Task 2 description in Huang et al., ICDAR 2019
-([arXiv:2103.10213](https://arxiv.org/abs/2103.10213)) and the RRC SROIE tasks page
-(<https://rrc.cvc.uab.es/?ch=13&com=tasks>), both read on 2026-11-17. The official RRC evaluation
-script was not inspected.
+Source for the official side: the [Task 2 description and evaluation protocol in Huang et al.,
+ICDAR 2019](https://arxiv.org/html/2103.10213v1) and the
+[RRC SROIE tasks page](https://rrc.cvc.uab.es/?ch=13&com=tasks). The
+[RRC Task 2 clarification](https://rrc.cvc.uab.es/?ch=13&com=news&id=3&view=data)
+covers splitting detected sentences into words and ignoring Chinese characters. The official
+RRC evaluation script was not inspected.
 
 Same as the official description:
 - Strings are tokenized by splitting on space, and punctuation is part of a token (official
@@ -241,9 +244,9 @@ Different (verified):
 - **Character scope.** Officially, the task is "restricted to words comprising Latin
   characters and numbers only", and Chinese characters are to be ignored. Here no token is
   filtered; every token is scored.
-- **Split rule.** Officially, strings are split on space. Here `str.split()` splits on any
-  whitespace (tabs, newlines, U+00A0, ...) and drops empty tokens. The two differ only for
-  text with whitespace other than single plain spaces.
+- **Split rule.** The official description says strings are split on space, without specifying
+  the behavior for repeated spaces or other whitespace [unverified]. Here `str.split()` splits
+  on any whitespace (tabs, newlines, U+00A0, ...) and drops empty tokens.
 - **Input.** Officially, participants submit a list of recognized words. Here the words come
   from PaddleOCR line texts split on whitespace. This matches the RRC note that the submitted
   words are "split from the detected sentences".
@@ -254,7 +257,7 @@ does the same):
 - Match criterion: exact string equality after normalization; no edit-distance tolerance.
   [unverified]
 - Aggregation: micro over the whole split, not a per-image average. [unverified]
-- Empty denominators give 0.0. [unverified]
+- Empty denominators give `null`. [unverified]
 
 So these numbers are close to Task 2 in spirit but are **not** comparable with the SROIE
 Task 2 leaderboard.

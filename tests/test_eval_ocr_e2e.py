@@ -49,13 +49,13 @@ def test_evaluate_reports_per_image_and_micro(tmp_path):
     }  # fmt: skip
 
 
-def test_evaluate_image_without_ocr_lines_scores_zero(tmp_path):
+def test_evaluate_image_without_ocr_lines_has_undefined_precision(tmp_path):
     write_ocr(tmp_path, "K1", [])
 
     result = cli.evaluate([gt("K1", ["TOTAL 1.00"])], tmp_path)
 
     assert result["per_image"][0] == {
-        "key": "K1", "tp": 0, "fp": 0, "fn": 2, "precision": 0.0, "recall": 0.0, "f1": 0.0
+        "key": "K1", "tp": 0, "fp": 0, "fn": 2, "precision": None, "recall": 0.0, "f1": 0.0
     }  # fmt: skip
 
 
@@ -154,3 +154,41 @@ def test_cli_refuses_ocr_dir_without_results(cli_env, monkeypatch):
     with pytest.raises(SystemExit, match="no OCR JSON"):
         run_cli(monkeypatch, "--ocr-dir", str(ocr_dir), "--out", str(out))
     assert not out.exists()
+
+
+def test_cli_prints_null_scores_when_all_ocr_lines_are_empty(cli_env, monkeypatch, capsys):
+    ocr_dir, out, _ = cli_env
+    write_ocr(ocr_dir, "K1", [])
+
+    run_cli(monkeypatch, "--ocr-dir", str(ocr_dir), "--out", str(out))
+
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["micro"] == {
+        "tp": 0,
+        "fp": 0,
+        "fn": 3,
+        "precision": None,
+        "recall": 0.0,
+        "f1": 0.0,
+    }
+    assert "P null R 0.0000 F1 0.0000" in capsys.readouterr().out
+
+
+def test_cli_serializes_all_null_scores_for_empty_prediction_and_gt(cli_env, monkeypatch, capsys):
+    ocr_dir, out, _ = cli_env
+    write_ocr(ocr_dir, "K1", [])
+    monkeypatch.setattr(cli, "load_gt_rows", lambda *args: ([gt("K1", [])], "abc123"))
+
+    run_cli(monkeypatch, "--ocr-dir", str(ocr_dir), "--out", str(out))
+
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["micro"] == {
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": None,
+        "recall": None,
+        "f1": None,
+    }
+    assert report["per_image"][0]["precision"] is None
+    assert "P null R null F1 null" in capsys.readouterr().out
