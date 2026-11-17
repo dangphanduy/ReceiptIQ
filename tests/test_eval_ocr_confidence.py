@@ -117,12 +117,19 @@ def test_cli_writes_report_and_chart(cli_env, monkeypatch, capsys):
     assert len(hist["correct"]) == len(hist["edges"]) - 1 == 21
     assert hist["wrong"][0] == 2 and hist["correct"][-1] == 1
 
-    assert len(view_all["sweep"]) == 52
+    assert len(view_all["sweep"]) == 59
+    assert list(view_all) == ["correct", "wrong", "histogram", "sweep", "candidate", "budget"]
     # every wrong line is < 0.71 and the correct one is 0.99: 0.71 is the lowest perfect t
     assert view_all["candidate"] == {
         "t": 0.71, "precision": 1.0, "recall": 1.0, "f1": 1.0, "flagged_rate": 2 / 3
     }  # fmt: skip
     assert clean["candidate"]["t"] == 0.71 and clean["candidate"]["flagged_rate"] == 0.5
+    # budget: highest t flagging <= 15% of lines; with 3 / 2 lines that means flagging none
+    assert view_all["budget"] == {
+        "t": 0.6, "precision": None, "recall": 0.0, "f1": 0.0,
+        "flagged_rate": 0.0, "max_flagged_rate": 0.15,
+    }  # fmt: skip
+    assert clean["budget"]["t"] == 0.7
 
     with Image.open(paths["chart"]) as img:
         assert img.format == "PNG" and img.width >= 800

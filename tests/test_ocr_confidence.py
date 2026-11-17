@@ -11,6 +11,7 @@ from ml.ocr_confidence import (
     is_comma_cut,
     latency_stats,
     percentile,
+    pick_budget,
     pick_threshold,
     threshold_sweep,
 )
@@ -136,10 +137,25 @@ def test_pick_threshold_all_none():
     assert pick_threshold([]) is None
 
 
+def test_pick_budget_highest_t_within_flagged_rate():
+    rows = [{"t": t, "flagged": f} for t, f in [(0.5, 0), (0.6, 1), (0.7, 3), (0.8, 4)]]
+    assert pick_budget(rows, total=20, max_flagged_rate=0.15)["t"] == 0.7  # 3/20 = 0.15, inclusive
+    assert pick_budget(rows, total=20, max_flagged_rate=0.1)["t"] == 0.6
+
+
+def test_pick_budget_none_when_no_row_fits():
+    assert pick_budget([{"t": 0.5, "flagged": 5}], total=10, max_flagged_rate=0.15) is None
+    assert pick_budget([{"t": 0.5, "flagged": 0}], total=0, max_flagged_rate=0.15) is None
+    assert pick_budget([], total=10, max_flagged_rate=0.15) is None
+
+
 def test_thresholds_grid():
-    assert len(THRESHOLDS) == 52
+    assert len(THRESHOLDS) == 59  # 0.50..0.99 (50) + 0.991..0.999 (9); 0.99/0.995/0.999 deduped
+    assert len(set(THRESHOLDS)) == len(THRESHOLDS)
     assert THRESHOLDS[:2] == (0.5, 0.51)
-    assert THRESHOLDS[-3:] == (0.99, 0.995, 0.999)
+    assert THRESHOLDS[-11:] == (
+        0.98, 0.99, 0.991, 0.992, 0.993, 0.994, 0.995, 0.996, 0.997, 0.998, 0.999
+    )  # fmt: skip
     assert 0.8 in THRESHOLDS and 0.57 in THRESHOLDS  # rounded, no 0.5700000000000001
     assert list(THRESHOLDS) == sorted(THRESHOLDS)
 
