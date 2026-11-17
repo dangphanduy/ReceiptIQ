@@ -62,6 +62,8 @@ def _seconds(doc: dict) -> float:
 
 
 def _ocr_doc(doc: dict) -> dict:
+    if type(doc["engine"]["device"]) is not str:
+        raise TypeError("engine.device must be str")
     lines = []
     for ln in doc["lines"]:
         text, conf = ln["text"], ln["confidence"]
@@ -147,17 +149,24 @@ def evaluate(
             confs.append(lines[p["pred_idx"]][2])
     keep = [i for i, p in enumerate(pairs) if not is_comma_cut(p)]
     device = resolve_device(ocr_dir, loaded["ocr_devices"])
+    if loaded["images"] and (device is None or not device.startswith("gpu:")):
+        raise ValueError(f"--ocr-dir must contain GPU OCR JSON, got device {device!r}")
 
     cpu = None
     if any(p.name != "manifest.json" for p in latency_dir.glob("*.json")):
         lat = load_ocr(gt_rows, latency_dir, _seconds)
         lat_device = resolve_device(latency_dir, lat["ocr_devices"])
-        cpu = _latency(latency_dir, lat_device, [s for _, s in lat["images"]])
+        if lat["images"] and lat_device != "cpu":
+            raise ValueError(f"expected CPU --latency-dir, got {lat_device!r}")
+        if lat["images"]:
+            cpu = _latency(latency_dir, lat_device, [s for _, s in lat["images"]])
 
     n_correct = sum(p["exact"] for p in pairs)
     return {
         "images_evaluated": len(loaded["images"]),
         "ocr_device": device,
+        "ocr_schema_version": loaded["ocr_schema_version"],
+        "size_mismatch_keys": loaded["size_mismatch_keys"],
         "latency": {
             "cpu": cpu,
             "gpu": _latency(ocr_dir, device, [doc["seconds"] for _, doc in loaded["images"]]),

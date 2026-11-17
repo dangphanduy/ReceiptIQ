@@ -91,10 +91,13 @@ def test_cli_writes_report_and_chart(cli_env, monkeypatch, capsys):
     assert selected == [["key", "words", "bboxes", "image_size"]]  # never decodes images
     assert list(report) == [
         "split", "sroie_revision", "iou_threshold", "ocr_dir", "ocr_device",
-        "latency", "counts", "confidence", "missing_keys",
+        "ocr_schema_version", "size_mismatch_keys", "latency", "counts", "confidence",
+        "missing_keys",
     ]  # fmt: skip
     assert report["sroie_revision"] == "abc123"
     assert report["ocr_device"] == "gpu:0"
+    assert report["ocr_schema_version"] == "1.0"
+    assert report["size_mismatch_keys"] == []
     assert report["missing_keys"] == ["K3"]
     assert report["counts"] == {"pairs": 3, "correct": 1, "wrong": 2, "comma_cut_removed": 1}
 
@@ -174,12 +177,64 @@ def test_evaluate_refuses_bad_inference_seconds(tmp_path):
         cli.evaluate([gt("K1", [(A, "x")])], tmp_path, tmp_path / "none", 0.5)
 
 
+def test_evaluate_names_file_for_non_string_device(tmp_path):
+    write_ocr(tmp_path, "K1", [(A, "x", 0.9)], 1.0, device=4)
+
+    with pytest.raises(ValueError, match="K1.json"):
+        cli.evaluate([gt("K1", [(A, "x")])], tmp_path, tmp_path / "none", 0.5)
+
+
 def test_evaluate_refuses_mixed_devices(tmp_path):
     write_ocr(tmp_path, "K1", [(A, "x", 0.9)], 1.0, device="gpu:0")
     write_ocr(tmp_path, "K2", [(A, "x", 0.9)], 1.0, device="cpu")
 
     with pytest.raises(ValueError, match="devices"):
         cli.evaluate([gt("K1", [(A, "x")]), gt("K2", [(A, "x")])], tmp_path, tmp_path / "x", 0.5)
+
+
+def test_evaluate_refuses_gpu_latency_sample(tmp_path):
+    ocr_dir, latency_dir = tmp_path / "ocr", tmp_path / "latency"
+    write_ocr(ocr_dir, "K1", [(A, "x", 0.9)], 1.0)
+    write_ocr(latency_dir, "K1", [], 2.0, device="gpu:0")
+
+    with pytest.raises(ValueError, match="CPU"):
+        cli.evaluate([gt("K1", [(A, "x")])], ocr_dir, latency_dir, 0.5)
+
+
+def test_evaluate_refuses_cpu_primary_dir_labeled_gpu(tmp_path):
+    write_ocr(tmp_path, "K1", [(A, "x", 0.9)], 1.0, device="cpu")
+
+    with pytest.raises(ValueError, match="GPU"):
+        cli.evaluate([gt("K1", [(A, "x")])], tmp_path, tmp_path / "none", 0.5)
+
+
+def test_evaluate_reports_cpu_null_for_unrelated_json(tmp_path):
+    ocr_dir, latency_dir = tmp_path / "ocr", tmp_path / "latency"
+    write_ocr(ocr_dir, "K1", [(A, "x", 0.9)], 1.0)
+    latency_dir.mkdir()
+    (latency_dir / "notes.json").write_text("{}", encoding="utf-8")
+
+    report = cli.evaluate([gt("K1", [(A, "x")])], ocr_dir, latency_dir, 0.5)
+
+    assert report["latency"]["cpu"] is None
+
+
+def test_evaluate_reports_size_mismatch(tmp_path):
+    write_ocr(tmp_path, "K1", [(A, "x", 0.9)], 1.0)
+
+    report = cli.evaluate([gt("K1", [(A, "x")], width=101)], tmp_path, tmp_path / "none", 0.5)
+
+    assert report["size_mismatch_keys"] == ["K1"]
+
+
+def test_evaluate_zero_matched_pairs_has_no_candidate(tmp_path):
+    write_ocr(tmp_path, "K1", [(A, "x", 0.9)], 1.0)
+
+    report = cli.evaluate([gt("K1", [(B, "x")])], tmp_path, tmp_path / "none", 0.5)
+
+    assert report["counts"] == {"pairs": 0, "correct": 0, "wrong": 0, "comma_cut_removed": 0}
+    assert report["confidence"]["all"]["candidate"] is None
+    assert report["confidence"]["clean"]["candidate"] is None
 
 
 def test_evaluate_refuses_gt_length_mismatch(tmp_path):

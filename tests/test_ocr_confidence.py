@@ -117,6 +117,24 @@ def test_threshold_sweep_none_when_no_wrong_lines():
     }  # fmt: skip
 
 
+def test_threshold_sweep_equal_confidence_is_not_flagged_and_higher_threshold_flags_all():
+    rows = threshold_sweep([0.8, 0.9], [True, False], [0.8, 1.0])
+
+    assert rows[0]["flagged"] == 0
+    assert rows[0]["precision"] is None
+    assert rows[0]["recall"] == 0.0
+    assert rows[1]["flagged"] == 2
+    assert rows[1]["tp"] == 1 and rows[1]["fp"] == 1 and rows[1]["fn"] == 0
+
+
+def test_threshold_sweep_all_correct_and_unflagged_has_undefined_ratios():
+    (row,) = threshold_sweep([0.9, 1.0], [False, False], [0.5])
+
+    assert row["precision"] is None
+    assert row["recall"] is None
+    assert row["f1"] is None
+
+
 def test_threshold_sweep_refuses_length_mismatch():
     with pytest.raises(ValueError):
         threshold_sweep([0.9, 0.8], [True], [0.5])
