@@ -37,6 +37,7 @@ from ml.ocr_confidence import (
     is_comma_cut,
     latency_stats,
     percentile,
+    pick_budget,
     pick_threshold,
     threshold_sweep,
 )
@@ -45,6 +46,7 @@ from ml.ocr_recognition import line_pairs
 GT_COLUMNS = ["key", "words", "bboxes", "image_size"]
 # one underflow bin [0, 0.80), then 0.01 bins over [0.80, 1.00] (last bin includes 1.0)
 EDGES = [0.0] + [round(0.8 + i / 100, 2) for i in range(21)]
+BUDGET_FLAGGED_RATE = 0.15  # "budget" point: highest t that flags at most this share of lines
 CREDIT = (
     "Data: ICDAR 2019 SROIE (Huang et al., 2019) via Hugging Face jsdnrs/ICDAR2019-SROIE, "
     "CC BY 4.0 (creativecommons.org/licenses/by/4.0). Processed by ReceiptIQ OCR."
@@ -95,11 +97,14 @@ def _view(pairs: Sequence[dict], confs: Sequence[float]) -> dict:
     correct_c = [c for c, w in zip(confs, wrong, strict=True) if not w]
     wrong_c = [c for c, w in zip(confs, wrong, strict=True) if w]
     sweep = threshold_sweep(confs, wrong, THRESHOLDS)
-    best = pick_threshold(sweep)
-    candidate = best and {
-        **{k: best[k] for k in ("t", "precision", "recall", "f1")},
-        "flagged_rate": best["flagged"] / len(pairs),
-    }
+
+    def point(row):
+        return row and {
+            **{k: row[k] for k in ("t", "precision", "recall", "f1")},
+            "flagged_rate": row["flagged"] / len(pairs),
+        }
+
+    budget = point(pick_budget(sweep, len(pairs), BUDGET_FLAGGED_RATE))
     return {
         "correct": _summary(correct_c),
         "wrong": _summary(wrong_c),
@@ -109,7 +114,8 @@ def _view(pairs: Sequence[dict], confs: Sequence[float]) -> dict:
             "wrong": histogram(wrong_c, EDGES),
         },
         "sweep": sweep,
-        "candidate": candidate,
+        "candidate": point(pick_threshold(sweep)),
+        "budget": budget and {**budget, "max_flagged_rate": BUDGET_FLAGGED_RATE},
     }
 
 
@@ -285,14 +291,21 @@ def _print_summary(report: dict, images: int, out: Path, chart: Path) -> None:
             f"{_fmt(lat['first_image_seconds'], '.2f')} s, mean without first "
             f"{_fmt(ex['mean'], '.2f')} s"
         )
+
+    def point(label, p):
+        p = p or {}
+        return (
+            f"{label} t {_fmt(p.get('t'), 'g')} P {_fmt(p.get('precision'))} "
+            f"R {_fmt(p.get('recall'))} F1 {_fmt(p.get('f1'))} "
+            f"flagged {_fmt(p.get('flagged_rate'), '.2%')}"
+        )
+
     for name, view in report["confidence"].items():
-        cand = view["candidate"] or {}
         print(
             f"{name}: conf median correct {_fmt(view['correct']['median'])} / wrong "
             f"{_fmt(view['wrong']['median'])}, p05 correct {_fmt(view['correct']['p05'])} / "
-            f"wrong {_fmt(view['wrong']['p05'])} | candidate t {_fmt(cand.get('t'), 'g')} "
-            f"P {_fmt(cand.get('precision'))} R {_fmt(cand.get('recall'))} "
-            f"F1 {_fmt(cand.get('f1'))} flagged {_fmt(cand.get('flagged_rate'), '.2%')}"
+            f"wrong {_fmt(view['wrong']['p05'])} | {point('candidate', view['candidate'])} | "
+            f"{point(f'budget <= {BUDGET_FLAGGED_RATE:.0%}', view['budget'])}"
         )
     print(f"-> {out}, {chart}")
 

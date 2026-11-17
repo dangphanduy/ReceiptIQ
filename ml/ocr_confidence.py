@@ -10,8 +10,15 @@ from collections.abc import Mapping, Sequence
 
 from ml.ocr_e2e import prf1
 
-# 0.50..0.99 step 0.01, then 0.995 and 0.999; rounded so 0.57 is 0.57, not 0.5700000000000001
-THRESHOLDS: tuple[float, ...] = tuple(round(0.5 + i / 100, 2) for i in range(50)) + (0.995, 0.999)
+# 0.50..0.99 step 0.01, plus 0.990..0.999 step 0.001 (where most lines sit), plus 0.995 and
+# 0.999; rounded so 0.57 is 0.57, not 0.5700000000000001, and duplicates collapse
+THRESHOLDS: tuple[float, ...] = tuple(
+    sorted(
+        {round(0.5 + i / 100, 2) for i in range(50)}
+        | {round(0.99 + i / 1000, 3) for i in range(10)}
+        | {0.995, 0.999}
+    )
+)
 
 
 def percentile(values: Sequence[float], p: int) -> float | None:
@@ -88,6 +95,15 @@ def threshold_sweep(
         rows.append({"t": t, "flagged": len(flagged), "tp": tp, "fp": fp, "fn": fn,
                      **prf1(tp, fp, fn)})  # fmt: skip
     return rows
+
+
+def pick_budget(rows: Sequence[Mapping], total: int, max_flagged_rate: float) -> Mapping | None:
+    """The row with the highest t whose flagged / total <= max_flagged_rate (inclusive).
+
+    None if no row fits or total is 0.
+    """
+    fits = [r for r in rows if total and r["flagged"] / total <= max_flagged_rate]
+    return max(fits, key=lambda r: r["t"]) if fits else None
 
 
 def pick_threshold(rows: Sequence[Mapping]) -> Mapping | None:
