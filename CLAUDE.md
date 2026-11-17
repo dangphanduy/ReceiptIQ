@@ -64,6 +64,7 @@ $PY scripts/run_ocr_batch.py --split test [--limit N] [--out-dir D] # -> outputs
 $PY scripts/eda_sroie.py [--seed 42 --n 20]                         # train-split EDA -> outputs/eda/, see docs/eda.md
 $PY scripts/eval_ocr_detection.py --split test --ocr-dir outputs/ocr/test-gpu [--out F] [--iou 0.5]  # -> outputs/eval/detection_test.json
 $PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu [--out F] [--iou 0.5]  # -> outputs/eval/recognition_test.json
+$PY scripts/eval_ocr_e2e.py --split test --ocr-dir outputs/ocr/test-gpu [--out F]  # -> outputs/eval/e2e_test.json
 
 G=/e/Anaconda/Enviroment/riq-gpu/python.exe        # GPU env, see Environment
 $G -m pytest                                        # tests must pass in both envs
@@ -115,11 +116,14 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   (CER / exact match on `match_greedy` pairs; empty normalized GT → CER None) and `summarize`.
   `scripts/eval_ocr_recognition.py` reuses `load_ocr` / `load_gt_rows` / `resolve_device` from
   `scripts/eval_ocr_detection.py` (same input contract) and reads GT `key`/`words`/`bboxes`/`image_size`.
-  End-to-end (word-level) and field metrics are not implemented yet.
+  `ml/ocr_e2e.py` (RIQ-21) is pure-Python word-level P/R/F1: `normalize_text` tokens split on
+  whitespace, `Counter` intersection per image, `micro_prf1` over summed counts, and 0.0 (not None,
+  unlike `ocr_eval.scores`) on a zero denominator. `scripts/eval_ocr_e2e.py` uses the same loaders,
+  reads GT `key`/`words`/`image_size`. Field metrics are not implemented yet.
 - Open GT data bug (separate from box splitting): in both splits many GT `words` are cut at the
   first comma while the box spans the whole printed line (GT `9` for `9, JALAN SUBANG JASA 3,`,
   `1` for `1,007.50`); no `words` element contains a comma. It inflates CER and will affect
-  end-to-end metrics; `entities` are intact. Likely a converter that split `x1,…,y4,TEXT` on every
+  end-to-end FP; `entities` are intact. Likely a converter that split `x1,…,y4,TEXT` on every
   comma. Do not patch GT or change metric rules for it outside its bug ticket; see
   "GT text cut at the first comma" in `docs/baseline.md`.
 

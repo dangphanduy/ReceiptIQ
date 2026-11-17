@@ -188,6 +188,77 @@ $PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu
   pull the mean CER up strongly; the median is much less affected. GT typos (see below) also
   count as OCR errors. Check the image before calling a worst line a model error.
 
+### End-to-end word metrics (RIQ-21)
+
+```bash
+$PY scripts/eval_ocr_e2e.py --split test --ocr-dir outputs/ocr/test-gpu
+#   [--out outputs/eval/e2e_test.json]
+```
+
+- Per image, every OCR `lines[].text` and every GT `words` string goes through
+  `normalize_text` (the same function as recognition, `ml/text_norm.py`) and is split on
+  whitespace. Punctuation stays attached to its token (`Date: 12/3/56` → `DATE:`, `12/3/56`).
+  Boxes, line order and line boundaries are ignored.
+- Tokens are matched as a **multiset** (`collections.Counter` intersection, `ml/ocr_e2e.py`,
+  pure Python): TP = Σ min(pred count, GT count) per token, FP = pred tokens − TP,
+  FN = GT tokens − TP. Pred `A A B` vs GT `A B B` gives TP 2, FP 1, FN 1.
+- `micro` sums TP/FP/FN over the split first and then takes the ratios; it is not the mean of
+  per-image F1. `per_image` rows carry each image's tp/fp/fn/precision/recall/f1.
+- **Zero-denominator rule: 0.0, never `null`.** No predicted tokens gives P = 0.0, no GT
+  tokens gives R = 0.0, both gives P = R = F1 = 0.0. This differs on purpose from detection
+  and recognition above, which report `null` for an empty denominator.
+- Same input contract and provenance as detection (`missing_keys`, `size_mismatch_keys`, mixed
+  schema/device refused, malformed JSON fails naming the file, non-str OCR text or GT word
+  refused, atomic write). GT columns read: `key`, `words`, `image_size` only. The report has
+  `split`, `sroie_revision`, `ocr_dir`, `ocr_device`, `ocr_schema_version`, `normalization`,
+  `counts` {`evaluated`, `missing`}, `micro` {tp, fp, fn, precision, recall, f1}, the key lists
+  and `per_image`. There is no `--iou`, because no box matching is involved.
+- **Caveat: comma-truncated GT text turns correct OCR words into FP** (see "GT text cut at the
+  first comma"). No GT `words` element contains a comma, so every predicted token with a comma
+  is a FP, and the words after a cut comma are missing from GT, so they are FP too. On the
+  full test split (`outputs/ocr/test-gpu`), 1,308 of the 39,963 predicted tokens contain a
+  comma, against 6,166 FP in total. Precision on this GT is therefore pessimistic.
+
+#### Differences from the official SROIE Task 2 protocol
+
+Source for the official side: the Task 2 description in Huang et al., ICDAR 2019
+([arXiv:2103.10213](https://arxiv.org/abs/2103.10213)) and the RRC SROIE tasks page
+(<https://rrc.cvc.uab.es/?ch=13&com=tasks>), both read on 2026-11-17. The official RRC evaluation
+script was not inspected.
+
+Same as the official description:
+- Strings are tokenized by splitting on space, and punctuation is part of a token (official
+  example: `Date: 12/3/56` → `Date:`, `12/3/56`).
+- Repeated words count repeatedly ("If certain words are repeated in an image, they are
+  expected to also be repeated in the submission results"), hence the multiset match.
+- P = correct matches / predicted words, R = correct matches / GT words, F1 is the headline.
+
+Different (verified):
+- **Ground truth.** Officially, GT is "the list of words that appear in the transcriptions".
+  Here it is the `words` column of the HF copy `jsdnrs/ICDAR2019-SROIE` at the pinned
+  revision, where many lines are cut at the first comma (see above). Scores here are not on
+  the official GT.
+- **Character scope.** Officially, the task is "restricted to words comprising Latin
+  characters and numbers only", and Chinese characters are to be ignored. Here no token is
+  filtered; every token is scored.
+- **Split rule.** Officially, strings are split on space. Here `str.split()` splits on any
+  whitespace (tabs, newlines, U+00A0, ...) and drops empty tokens. The two differ only for
+  text with whitespace other than single plain spaces.
+- **Input.** Officially, participants submit a list of recognized words. Here the words come
+  from PaddleOCR line texts split on whitespace. This matches the RRC note that the submitted
+  words are "split from the detected sentences".
+
+Not stated in either official source (our choice, [unverified] whether the official script
+does the same):
+- Case: tokens are uppercased (case-insensitive match). [unverified]
+- Match criterion: exact string equality after normalization; no edit-distance tolerance.
+  [unverified]
+- Aggregation: micro over the whole split, not a per-image average. [unverified]
+- Empty denominators give 0.0. [unverified]
+
+So these numbers are close to Task 2 in spirit but are **not** comparable with the SROIE
+Task 2 leaderboard.
+
 ### GT text cut at the first comma (open data bug)
 
 Two different GT problems were mixed up in earlier notes:
@@ -202,8 +273,8 @@ Two different GT problems were mixed up in earlier notes:
   example was earlier misread as (a)), GT `1` for the amount `1,007.50`. No GT `words`
   element in either split contains a comma, while most address entities do. It hits
   addresses most, but any line with a comma (amounts with a thousands separator, item
-  lines) can be cut. It affects every metric that uses `words` text (recognition now,
-  end-to-end later), on both splits.
+  lines) can be cut. It affects every metric that uses `words` text (recognition and
+  end-to-end), on both splits.
 - `entities` (company/date/address/total, used by field evaluation) are not cut: address
   entities keep their commas and the text the `words` lost, and a total like `1,007.50`
   is intact.
@@ -283,7 +354,8 @@ Text quoted above comes from SROIE ground truth and images. See the
 
 ## How it will be measured
 
-Detection (item 1 below) is implemented in RIQ-19 and recognition (item 2) in RIQ-20.
+Detection (item 1 below) is implemented in RIQ-19, recognition (item 2) in RIQ-20 and
+end-to-end word metrics (item 3) in RIQ-21.
 Everything else in this section is planned, not implemented yet.
 
 Evaluate on the **test split** only (361 images). Train is kept for later error analysis and tuning.
@@ -295,7 +367,8 @@ Evaluate on the **test split** only (361 images). Train is kept for later error 
 2. **Recognition**, on matched pairs: character error rate (CER = edit distance /
    GT length) and line exact-match rate after normalization (uppercase, collapse whitespace).
 3. **End-to-end**: word-level precision/recall/F1 on whitespace-split tokens
-   (multiset match per image), close to the SROIE Task 2 protocol.
+   (multiset match per image, micro over the split), close to the SROIE Task 2 protocol but not
+   identical (see "Differences from the official SROIE Task 2 protocol").
 4. Also report mean inference time per image on CPU, and the confidence
    distribution for correct and incorrect lines. This shows whether confidence
    is useful for flagging lines the MVP should ask the user to review.
@@ -314,12 +387,14 @@ For `company`, `date`, `address`, `total`:
 
 ## Known limitations
 
-- Detection (RIQ-19) and recognition (RIQ-20: CER and line exact match on matched pairs)
-  metrics exist. End-to-end (word-level) and field-accuracy metrics are not implemented yet.
+- Detection (RIQ-19), recognition (RIQ-20: CER and line exact match on matched pairs) and
+  end-to-end word (RIQ-21) metrics exist. Field-accuracy metrics are not implemented yet.
+- End-to-end word scores use the HF copy's `words` as GT and score every token, so they are
+  not comparable with the SROIE Task 2 leaderboard (see the RIQ-21 section).
 - Recognition is only scored on detection-matched pairs, so unmatched lines never reach it.
 - GT `words` text is cut at the first comma on many lines in both splits (open data bug,
-  see "GT text cut at the first comma"). This inflates CER and will affect end-to-end
-  metrics; `entities` are not affected.
+  see "GT text cut at the first comma"). This inflates CER and end-to-end FP; `entities` are
+  not affected.
 - Detection is scored at line level against GT boxes that often split one printed line, so
   recall and precision are underestimated (see the RIQ-19 caveat above). There is no
   word-level or polygon matching, and no Hungarian (optimal) assignment.
