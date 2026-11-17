@@ -65,6 +65,8 @@ $PY scripts/eda_sroie.py [--seed 42 --n 20]                         # train-spli
 $PY scripts/eval_ocr_detection.py --split test --ocr-dir outputs/ocr/test-gpu [--out F] [--iou 0.5]  # -> outputs/eval/detection_test.json
 $PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu [--out F] [--iou 0.5]  # -> outputs/eval/recognition_test.json
 $PY scripts/eval_ocr_e2e.py --split test --ocr-dir outputs/ocr/test-gpu [--out F]  # -> outputs/eval/e2e_test.json
+$PY scripts/run_ocr_batch.py --split test --limit 40 --device cpu --out-dir outputs/ocr/test-cpu-latency  # CPU latency sample, ~20 min
+$PY scripts/eval_ocr_confidence.py --split test [--ocr-dir outputs/ocr/test-gpu] [--latency-dir outputs/ocr/test-cpu-latency] [--out F] [--chart P] [--iou 0.5]  # -> outputs/eval/confidence_test.json + confidence_hist_test.png
 
 G=/e/Anaconda/Enviroment/riq-gpu/python.exe        # GPU env, see Environment
 $G -m pytest                                        # tests must pass in both envs
@@ -120,6 +122,14 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   whitespace, `Counter` intersection per image, `micro_prf1` over summed counts, and None
   (JSON `null`) on a zero denominator. `scripts/eval_ocr_e2e.py` uses the same loaders,
   reads GT `key`/`words`/`image_size`. Field metrics are not implemented yet.
+  `ml/ocr_confidence.py` (RIQ-22) is pure-Python (no paddle, cv2, datasets or PIL):
+  `latency_stats` (p95 nearest-rank via `percentile`), `is_comma_cut` (suspected GT comma-cut
+  pair), `histogram`, `threshold_sweep` over `THRESHOLDS` (flag if confidence < t, positive =
+  wrong line, reuses `ml.ocr_e2e.prf1`), `pick_threshold` (max F1, ties to lower t) and
+  `pick_budget` (highest t flagging ≤ a share of lines; the CLI uses 15%).
+  `scripts/eval_ocr_confidence.py` runs it on `line_pairs` with the same loaders, reports
+  latency for `--ocr-dir` and the optional `--latency-dir` CPU sample, and draws the chart with
+  Pillow inside the script (never add matplotlib).
 - Open GT data bug (separate from box splitting): in both splits many GT `words` are cut at the
   first comma while the box spans the whole printed line (GT `9` for `9, JALAN SUBANG JASA 3,`,
   `1` for `1,007.50`); no `words` element contains a comma. It inflates CER and will affect

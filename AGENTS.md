@@ -35,6 +35,8 @@ $G  scripts/run_ocr_batch.py --split test --device gpu:0 --out-dir outputs/ocr/t
 $PY scripts/eval_ocr_detection.py --split test --ocr-dir outputs/ocr/test-gpu
 $PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu
 $PY scripts/eval_ocr_e2e.py --split test --ocr-dir outputs/ocr/test-gpu
+$PY scripts/run_ocr_batch.py --split test --limit 40 --device cpu --out-dir outputs/ocr/test-cpu-latency
+$PY scripts/eval_ocr_confidence.py --split test   # GPU dir + CPU latency dir; JSON + PNG chart
 ```
 
 - `--device` is `cpu` (default) or `gpu:<int>`. Each OCR JSON records `engine.device`; the
