@@ -205,8 +205,8 @@ def draw_chart(path: Path, confidence: Mapping, counts: Mapping, subtitle: str) 
         def y_of(v, y0=y0, y1=y1, y_max=y_max):
             return y1 - v / y_max * (y1 - y0)
 
-        for k in range(6):  # y grid and ticks
-            v = y_max * k / 5
+        for k in range(round(y_max * 10) + 1):  # y grid and ticks every 0.1
+            v = k / 10
             d.line([(x0, y_of(v)), (x1, y_of(v))], fill=grid)
             d.text((x0 - 8, y_of(v)), f"{v:.2f}", fill=ink, font=f_small, anchor="rm")
         for i in range(n_bins):
@@ -225,7 +225,11 @@ def draw_chart(path: Path, confidence: Mapping, counts: Mapping, subtitle: str) 
             d.line([(x, y1), (x, y1 + 5)], fill=ink, width=2)
             d.text((x, y1 + 8), f"{0.8 + k / 100:.2f}", fill=ink, font=f_small, anchor="ma")
         d.text(((x0 + x1) / 2, y1 + 32), "OCR line confidence", fill=ink, font=f_text, anchor="ma")
-        d.text((18, (y0 + y1) / 2), "share of class", fill=ink, font=f_text, anchor="mm")
+        y_label = Image.new("RGB", (220, 24), "white")  # Pillow cannot draw rotated text directly
+        ImageDraw.Draw(y_label).text(
+            (110, 12), "share of class", fill=ink, font=f_text, anchor="mm"
+        )
+        img.paste(y_label.rotate(90, expand=True), (12, int((y0 + y1) / 2 - 110)))
         d.text((x0, top + 14), titles[view_name], fill=ink, font=f_text)
 
         cand = view["candidate"]
