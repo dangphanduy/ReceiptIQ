@@ -14,10 +14,13 @@ provenance and CC BY 4.0 attribution.
 - `ml/`: `ocr_schema.py` (versioned OCR JSON contract), `ocr_engine.py` (the only place
   PaddleOCR is configured: `OCR_CONFIG`, `create_engine(device)`, `run_ocr`), `ocr_eval.py`
   (IoU, greedy matching, P/R/F1), `text_norm.py` (`normalize_text`, the one text
-  normalization), `ocr_recognition.py` (edit distance, CER, line exact match). These four
-  stay pure Python: they never import paddle, cv2 or datasets.
+  normalization), `ocr_recognition.py` (edit distance, CER, line exact match),
+  `ocr_errors.py` (RIQ-23: excludes GT artefacts with `is_comma_cut`, `is_comma_cut_variant`
+  and `KNOWN_GT_TYPOS`, then gives each wrong line pair one heuristic error category; add a
+  typo only after checking the receipt image). These stay pure Python: they never import
+  paddle, cv2 or datasets.
 - `scripts/`: download SROIE, single-image OCR, resumable batch OCR, detection and
-  recognition eval, EDA.
+  recognition eval, OCR error report, EDA.
 - `tests/`: fast, model-free pytest. `docs/`: provenance, plans, findings.
 - `data/` and `outputs/` are generated locally and stay untracked.
 
@@ -37,6 +40,7 @@ $PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu
 $PY scripts/eval_ocr_e2e.py --split test --ocr-dir outputs/ocr/test-gpu
 $PY scripts/run_ocr_batch.py --split test --limit 40 --device cpu --out-dir outputs/ocr/test-cpu-latency
 $PY scripts/eval_ocr_confidence.py --split test   # GPU dir + CPU latency dir; JSON + PNG chart
+$PY scripts/ocr_error_report.py --split test --ocr-dir outputs/ocr/test-gpu   # -> outputs/eval/ocr_errors_test.json
 ```
 
 - `--device` is `cpu` (default) or `gpu:<int>`. Each OCR JSON records `engine.device`; the
