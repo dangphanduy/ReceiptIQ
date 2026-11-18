@@ -43,8 +43,21 @@ One machine; every number below comes from it.
 | Driver / CUDA | NVIDIA driver 610.88 (`nvidia-smi` reports CUDA UMD 13.3); `paddlepaddle-gpu` built for CUDA 12.6 and cuDNN 9.9, run with `nvidia-cudnn-cu12` 9.5.1.17 (see `CLAUDE.md` → Environment) |
 | OS | Windows 11 Home Single Language 10.0.26300 |
 
-Read with `Get-CimInstance Win32_Processor`, `Win32_ComputerSystem` and `Win32_OperatingSystem`
-(PowerShell), `nvidia-smi`, and `paddle.version.cuda()` / `paddle.version.cudnn()` in the GPU env.
+Read with the PowerShell block below (from the repo root; `$G` is the GPU env's `python.exe`, see
+`CLAUDE.md`). It writes `outputs/eval/hardware_riq23.txt`, which is git-ignored like the rest of
+`outputs/`.
+
+```powershell
+& {
+  Get-CimInstance Win32_Processor | Format-List Name, NumberOfCores, NumberOfLogicalProcessors
+  "TotalPhysicalMemory GiB: {0:N1}" -f ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+  Get-CimInstance Win32_OperatingSystem | Format-List Caption, Version, BuildNumber
+  nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+  nvidia-smi | Select-Object -First 4
+  & $G -c "import paddle; print('paddle', paddle.__version__, 'cuda', paddle.version.cuda(), 'cudnn', paddle.version.cudnn())"
+  & $G -m pip show nvidia-cudnn-cu12 | Select-String '^(Name|Version)'
+} | Out-File -Encoding utf8 outputs/eval/hardware_riq23.txt
+```
 
 ### Commands
 
@@ -102,20 +115,21 @@ held-out dev subset of it), pick t there, then evaluate that fixed t once on tes
 ### Top 5 OCR error categories
 
 Command (7), `outputs/eval/ocr_errors_test.json`. Of the 17,645 matched pairs, 3,438 are wrong
-(normalized texts differ). Before classifying, the script excludes GT artefacts:
-862 GT comma-cuts (`ml.ocr_confidence.is_comma_cut`), 28 near comma-cuts that differ only in
-spacing or punctuation before the comma (`is_comma_cut_variant`), and 11 lines with a GT typo
-checked against the image (`KNOWN_GT_TYPOS`). The remaining **2,537** pairs each get one category
-(`ml/ocr_errors.py`, a heuristic). Spaces are compared first; then the space-free texts are
+(normalized texts differ). Before classifying, the script removes the GT artefacts its
+heuristic filters detect: 862 GT comma-cuts (`ml.ocr_confidence.is_comma_cut`), 15 comma-cut
+variants that differ only in spacing or punctuation before the comma and have a letter or digit
+after it (`is_comma_cut_variant`), and 11 lines with a GT typo checked against the image
+(`KNOWN_GT_TYPOS`). Some GT artefacts remain (see Known limitations). The remaining **2,550**
+pairs each get one category (`ml/ocr_errors.py`, a heuristic). Spaces are compared first; then the space-free texts are
 diffed character by character, and a pair whose edits fall in different categories is `mixed`.
 
 | # | Category | Count | Share | What it is |
 |---|---|---|---|---|
-| 1 | `spacing` | 913 | 36.0% | Texts differ only in spaces, mostly around `:` and `(`. Often GT whitespace convention rather than a misread (2 of the 3 checked examples). |
-| 2 | `punctuation` | 488 | 19.2% | Only punctuation differs: a far-right `:` inside the GT box that OCR leaves out, a dropped decimal point, extra dashes. |
+| 1 | `spacing` | 913 | 35.8% | Texts differ only in spaces, mostly around `:` and `(`. Often GT whitespace convention rather than a misread (2 of the 3 checked examples). |
+| 2 | `punctuation` | 501 | 19.6% | Only punctuation differs: a far-right `:` inside the GT box that OCR leaves out, a dropped decimal point, extra dashes, a line-end `,` where GT has `.` or nothing. |
 | 3 | `char_substitution` | 282 | 11.1% | Letter read as another letter, or digit as another digit (`i`→`l`, `m`→`rn`, `9`→`8`). |
-| 4 | `extra_text` | 235 | 9.3% | OCR has extra text at the start or end. In the pairs inspected, usually the OCR line spans a neighbouring GT box (quantity + amount, label + value): segmentation, not a misread. |
-| 5 | `digit_letter` | 195 | 7.7% | A digit read as a letter or the reverse (`D`→`0`, `S`→`8`, `0`→`C`). |
+| 4 | `extra_text` | 235 | 9.2% | OCR has extra text at the start or end. In the pairs inspected, usually the OCR line spans a neighbouring GT box (quantity + amount, label + value): segmentation, not a misread. |
+| 5 | `digit_letter` | 195 | 7.6% | A digit read as a letter or the reverse (`D`→`0`, `S`→`8`, `0`→`C`). |
 
 The rest: `symbol` 186 (symbol ↔ letter/digit, e.g. `$`→`S`, `@`→`0`), `mixed` 122,
 `missing_text` 74 (text missing at the start or end), `inner_insert_delete` 42.
@@ -136,7 +150,7 @@ Each was checked against the test image:
 | `char_substitution` | `X51005230621` [41] | `TOTAL ITEM(S) :` | `Total Itern(s):` | `m` read as `rn`. Real OCR error. |
 | `extra_text` | `X00016469670` [27] | `193.00` | `1 193.00` | GT boxes quantity and amount separately; OCR returns the row. Segmentation, text right. |
 | `extra_text` | `X00016469671` [40] | `****THANK YOU` | `****Thank You. Please Come Again.****` | Prints the whole OCR line; the GT text stops before `. Please Come Again.`. OCR right. |
-| `extra_text` | `X51005230605` [19] | `DOUBLE ` | `A 2 double ,mint te` | Prints `2 double ,mint te`; GT is cut at the comma, and the OCR line also spans the quantity, so neither comma filter catches it. |
+| `extra_text` | `X51005230605` [19] | `DOUBLE ` | `A 2 double ,mint te` | Prints `2 double ,mint te`; GT is cut at the comma, and the OCR line also spans the quantity, so neither comma filter catches it (known miss, see Known limitations). |
 | `digit_letter` | `X00016469670` [43] | `XXXXXXXXXXXX4318` | `xxxxx000000x4318` | Prints `xxxxxxxxxxxx4318`; `x` read as `0`. Real OCR error. |
 | `digit_letter` | `X51005200931` [28] | `114.00` | `114.0C` | The last `0` is broken in the print and looks like `C`. |
 | `digit_letter` | `X51005230621` [7] | `(COMPANY REG NO: 284922-D)` | `(Company Reg No: 284922-0)` | Prints `284922-D` clearly; `D` read as `0`. Real OCR error. |
@@ -587,18 +601,26 @@ For `company`, `date`, `address`, `total`:
 
 - Detection (RIQ-19), recognition (RIQ-20: CER and line exact match on matched pairs),
   end-to-end word (RIQ-21), latency and confidence (RIQ-22) metrics exist. Field-accuracy
-  metrics are not implemented yet. CER is reported as the mean and median of per-pair CER;
-  there is no micro CER.
+  metrics are not implemented yet.
+- Only the mean and median of per-line CER are reported. Micro CER (total edits / total GT
+  characters) is not computed.
 - Every confidence threshold reported (max-F1 and the 15% budget point) is exploratory: it was
   picked and scored on the same test split, so its precision and recall are optimistic. A
   validated operating point needs a threshold picked on train (or a dev subset) and scored once on
   test. Confidence is not calibrated (RIQ-49).
 - The OCR error categories (RIQ-23) come from a heuristic classifier (`ml/ocr_errors.py`): one
-  category per pair from a character diff, with no knowledge of layout. A pair with a GT
-  artefact that the filters miss lands in an OCR-error category (e.g. GT cut at a comma when the
-  OCR line also spans a neighbouring box). `KNOWN_GT_TYPOS` only lists typos checked against
-  the image, and excluding those lines also drops any OCR error on them (`X51005230621`
-  `INCLUSLVE` was also misread as `INCLUEIVE`).
+  category per pair from a character diff, with no knowledge of layout. The GT artefact filters
+  in front of it (`is_comma_cut`, `is_comma_cut_variant`, `KNOWN_GT_TYPOS`) are heuristics too:
+  - They miss some comma cuts. Known miss: `X51005230605` [19], GT `DOUBLE` vs OCR
+    `A 2 double ,mint te`. GT is cut at the comma, but the OCR line also spans the quantity box,
+    so the text before the comma does not match GT and the pair is counted as `extra_text`.
+    The filters are deliberately not widened to catch this.
+  - `is_comma_cut_variant` needs a letter or digit after the comma, so a line-end comma with
+    nothing after it (GT `SETAPAK.`, OCR `SETAPAK,`; GT `KEPONG BARU`, OCR `KEPONGBARU,`)
+    counts as `punctuation`, not as a cut.
+  - `KNOWN_GT_TYPOS` only lists typos checked against the image, so unchecked GT typos still
+    count as OCR errors. Excluding a listed line also drops any OCR error on it (`X51005230621`
+    `INCLUSLVE` was also misread as `INCLUEIVE`).
 - All numbers come from a single machine (see Hardware in Results). Latency on other CPUs or
   GPUs will differ.
 - End-to-end word scores use the HF copy's `words` as GT and score every token, so they are
