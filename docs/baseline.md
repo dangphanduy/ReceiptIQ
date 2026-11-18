@@ -491,7 +491,7 @@ Two different GT problems were mixed up in earlier notes:
   is intact.
 - Likely cause (hypothesis, not yet confirmed against the original SROIE box files): the
   conversion to the HF copy split each original `x1,y1,…,x4,y4,TEXT` line on every comma and
-  kept only the first text field. Fixing GT is tracked as a separate bug; until then,
+  kept only the first text field. Fixing GT is tracked as a separate bug (RIQ-60); until then,
   recognition numbers on this GT are pessimistic and the metric rules stay unchanged.
 
 ## Sanity check on 30 test samples (RIQ-17)

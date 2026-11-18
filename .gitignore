@@ -11,6 +11,9 @@ outputs/
 *.parquet
 *.arrow
 
+# --- End-of-sprint QA reports: reports/sprint-<N>/ (report + logs with OCR text from receipts) ---
+reports/
+
 # --- Model weights / exported models ---
 *.pdparams
 *.pdiparams

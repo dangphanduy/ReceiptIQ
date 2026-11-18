@@ -142,13 +142,15 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   first comma while the box spans the whole printed line (GT `9` for `9, JALAN SUBANG JASA 3,`,
   `1` for `1,007.50`); no `words` element contains a comma. It inflates CER and will affect
   end-to-end metrics; `entities` are intact. Likely a converter that split `x1,…,y4,TEXT` on every
-  comma. Do not patch GT or change metric rules for it outside its bug ticket; see
+  comma. Do not patch GT or change metric rules for it outside its bug ticket (RIQ-60); see
   "GT text cut at the first comma" in `docs/baseline.md`.
 
 ## Rules specific to this repo
 
 - `data/`, `outputs/`, image files, model weights (`*.pdparams` etc.) and `.env` are
   git-ignored. Never commit datasets, receipt images or weights.
+- End-of-sprint QA reports go in `reports/sprint-<N>/` (report `.docx` + `logs/` with every
+  command output it cites), one folder per sprint. `reports/` is git-ignored.
 - SROIE is CC BY 4.0. Any shown or redistributed derived material needs the attribution
   in `docs/dataset.md`.
 - Do not claim Vietnamese support or suitability for accounting/tax use anywhere.

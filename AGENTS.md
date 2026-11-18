@@ -23,6 +23,8 @@ provenance and CC BY 4.0 attribution.
   recognition eval, OCR error report, EDA.
 - `tests/`: fast, model-free pytest. `docs/`: provenance, plans, findings.
 - `data/` and `outputs/` are generated locally and stay untracked.
+- `reports/sprint-<N>/`: end-of-sprint QA report (`.docx`) and its `logs/`, one folder per
+  sprint; git-ignored.
 
 ## Environments and commands
 
@@ -54,7 +56,7 @@ $PY scripts/ocr_error_report.py --split test --ocr-dir outputs/ocr/test-gpu   # 
 - Known GT issues: (a) GT often splits one printed line into several boxes (label / value,
   columns), which lowers line-level detection scores; (b) separately, many GT `words` are cut
   at the first comma while the box covers the whole line, which inflates CER. `entities` are
-  not cut. (b) is an open data bug; see `docs/baseline.md` before interpreting text metrics.
+  not cut. (b) is an open data bug (RIQ-60); see `docs/baseline.md` before interpreting text metrics.
 
 ## Coding and tests
 
