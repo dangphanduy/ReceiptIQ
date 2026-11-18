@@ -87,7 +87,8 @@ BibTeX:
 - **Scans, not phone photos**: mostly flat and upright scans. Real uploads
   (skewed, shadowed, crumpled photos) will perform worse.
 - **Privacy**: some personal fields are blurred, but company names and addresses remain.
-- **Annotation quirks**: field strings follow SROIE conventions (e.g. `total`
-  without currency, multi-line addresses joined). Evaluation must normalize
-  consistently, see [baseline.md](baseline.md).
+- **Annotation quirks**: field strings follow SROIE conventions (e.g. `total` usually
+  without currency, though ~15% keep `$` or `RM`; multi-line addresses joined). Evaluation must normalize
+  consistently, see [baseline.md](baseline.md). Hard cases and GT errors found on the
+  train split are listed in [eda.md](eda.md).
 - **Unknown split criterion**: the card does not say how train/test were split.

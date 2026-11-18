@@ -24,7 +24,7 @@ packages = ["app", "ml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "scripts"]  # scripts/ for standalone script helpers (eda_sroie.shape)
 
 [tool.ruff]
 line-length = 100
