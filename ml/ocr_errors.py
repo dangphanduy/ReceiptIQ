@@ -15,10 +15,15 @@ from ml.ocr_confidence import is_comma_cut
 # GT tokens checked against the receipt image: the image shows what OCR read, GT is wrong.
 # Keyed by SROIE key so a token is only excluded on the receipt where it was checked.
 KNOWN_GT_TYPOS: dict[str, frozenset[str]] = {
-    "X51005230621": frozenset({"INVOLCE", "INCLUSLVE"}),
-    "X51005442322": frozenset({"ROASTEO"}),
+    "X00016469670": frozenset({"PERSON"}),  # receipt prints "Sales Persor"
+    "X00016469671": frozenset({"PERSON"}),
+    "X51005200931": frozenset({"JM0326955-V"}),  # prints JM0325955-V
+    "X51005230621": frozenset({"INVOLCE", "INCLUSLVE", "AMONUT"}),
+    "X51005230648": frozenset({"INVOLCE"}),
+    "X51005442322": frozenset({"ROASTEO", "RECRUITEMNT@TONYROMAS.COM.MY"}),
     "X51005442366": frozenset({"FUJ1500ML"}),
     "X51005442375": frozenset({"FRLED"}),
+    "X51005715007": frozenset({"CAHS"}),
 }
 
 
