@@ -54,6 +54,17 @@ def evaluate(
     }
 
 
+def parse_examples(value: str) -> int:
+    """argparse type for --examples: an integer >= 0."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {value!r}") from None
+    if n < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return n
+
+
 def _print_summary(report: dict, images: int, out: Path) -> None:
     c = report["counts"]
     print(
@@ -75,7 +86,9 @@ def main() -> None:
     parser.add_argument("--ocr-dir", type=Path, help="default: outputs/ocr/<split>-gpu/")
     parser.add_argument("--out", type=Path, help="default: outputs/eval/ocr_errors_<split>.json")
     parser.add_argument("--iou", type=parse_iou_threshold, default=0.5, help="pair if IoU >= this")
-    parser.add_argument("--examples", type=int, default=3, help="example keys per category")
+    parser.add_argument(
+        "--examples", type=parse_examples, default=3, help="example keys per category (>= 0)"
+    )
     args = parser.parse_args()
     ocr_dir = args.ocr_dir or ROOT / "outputs" / "ocr" / f"{args.split}-gpu"
     out = args.out or ROOT / "outputs" / "eval" / f"ocr_errors_{args.split}.json"

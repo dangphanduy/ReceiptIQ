@@ -35,10 +35,15 @@ def is_comma_cut_variant(pair: Mapping) -> bool:
     """GT cut at the first comma, but with a spacing or punctuation difference before the comma
     that ml.ocr_confidence.is_comma_cut does not allow (GT `KG BATU 30`, OCR `KG BATU30,ULU`).
 
-    Compares letters and digits only, so it is looser than is_comma_cut.
+    Compares letters and digits only, so it is looser than is_comma_cut. Something must have
+    been cut: the OCR text after the first comma needs at least one letter or digit, so GT
+    `SETAPAK.` vs OCR `SETAPAK,` is not a variant.
     """
     pred = pair["pred_norm"]
-    return "," in pred and _alnum(pred.split(",", 1)[0]) == _alnum(pair["gt_norm"])
+    if "," not in pred:
+        return False
+    before, after = pred.split(",", 1)
+    return bool(_alnum(after)) and _alnum(before) == _alnum(pair["gt_norm"])
 
 
 def is_known_gt_typo(pair: Mapping) -> bool:
@@ -89,7 +94,10 @@ def error_report(pairs: Sequence[Mapping], n_examples: int = 3) -> dict:
     Exclusions, first match wins: is_comma_cut, is_comma_cut_variant, is_known_gt_typo.
     Categories sort by count desc, then name; `share` is count / classified. Examples are the
     first pairs in input order with distinct keys, at most n_examples per category.
+    Raises ValueError for n_examples < 0.
     """
+    if n_examples < 0:
+        raise ValueError(f"n_examples must be >= 0, got {n_examples}")
     wrong = [p for p in pairs if not p["exact"]]
     excluded = Counter()
     by_cat: dict[str, list[Mapping]] = {}
