@@ -48,9 +48,9 @@ def cli_env(tmp_path, monkeypatch):
     return tmp_path, selected
 
 
-def run_cli(monkeypatch, ocr_dir, out):
+def run_cli(monkeypatch, ocr_dir, out, *extra):
     argv = ["ocr_error_report.py", "--split", "test", "--ocr-dir", str(ocr_dir), "--out", str(out)]
-    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(sys, "argv", [*argv, *extra])
     cli.main()
 
 
@@ -78,4 +78,35 @@ def test_cli_exits_without_any_ocr_json(cli_env, monkeypatch):
     out = tmp_path / "out.json"
     with pytest.raises(SystemExit, match="no OCR JSON"):
         run_cli(monkeypatch, tmp_path / "empty", out)
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("value", ["-1", "abc", "1.5"])
+def test_cli_rejects_bad_examples(cli_env, monkeypatch, capsys, value):
+    tmp_path, _ = cli_env
+    out = tmp_path / "out.json"
+    with pytest.raises(SystemExit) as exc:
+        run_cli(monkeypatch, tmp_path / "ocr", out, "--examples", value)
+    assert exc.value.code == 2  # argparse usage error, before any file is read
+    assert "--examples" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_cli_zero_examples(cli_env, monkeypatch):
+    tmp_path, _ = cli_env
+    ocr_dir, out = tmp_path / "ocr", tmp_path / "out.json"
+    write_ocr(ocr_dir, "K1", [(A, "Tel:03")])
+    run_cli(monkeypatch, ocr_dir, out, "--examples", "0")
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert [c["examples"] for c in report["categories"]] == [[]]
+
+
+@pytest.mark.parametrize("contents", ['{"schema_version": "1.0"}', "{broken"])
+def test_cli_refuses_malformed_ocr_json(cli_env, monkeypatch, contents):
+    tmp_path, _ = cli_env
+    ocr_dir, out = tmp_path / "ocr", tmp_path / "out.json"
+    ocr_dir.mkdir()
+    (ocr_dir / "K1.json").write_text(contents, encoding="utf-8")
+    with pytest.raises(SystemExit, match="K1.json"):
+        run_cli(monkeypatch, ocr_dir, out)
     assert not out.exists()

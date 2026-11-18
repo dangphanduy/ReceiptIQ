@@ -50,8 +50,11 @@ def test_classify_refuses_a_correct_pair():
     ("gt", "pred", "expected"),
     [
         ("KG BATU 30", "KG BATU30,ULUYAM LAMA", True),  # space differs before the cut comma
-        ("SETAPAK.", "SETAPAK,", True),
+        ("KG BATU 30", "KG BATU30,ULU", True),
         ("9", "9, JALAN SUBANG", True),
+        ("SETAPAK.", "SETAPAK,", False),  # nothing cut: no letter/digit after the comma
+        ("TOTAL", "TOTAL,", False),
+        ("TOTAL", "TOTAL, - .", False),  # only spaces and punctuation after the comma
         ("KG BATU 30", "KG BATU 31,ULUYAM", False),
         ("TOTAL", "TOTAL.", False),  # no comma
     ],
@@ -121,6 +124,16 @@ def test_error_report_examples_skip_repeated_keys():
     pairs.append(pair("K2", "TEL : 3", "TEL:3"))
     examples = error_report(pairs, n_examples=3)["categories"][0]["examples"]
     assert [e["key"] for e in examples] == ["K1", "K2"]
+
+
+def test_error_report_zero_examples():
+    report = error_report([pair("K1", "TEL : 1", "TEL:1")], n_examples=0)
+    assert report["categories"][0]["examples"] == []
+
+
+def test_error_report_refuses_negative_examples():
+    with pytest.raises(ValueError, match="n_examples"):
+        error_report([pair("K1", "TEL : 1", "TEL:1")], n_examples=-1)
 
 
 def test_error_report_with_no_wrong_pairs():
