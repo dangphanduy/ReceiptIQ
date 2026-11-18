@@ -67,6 +67,7 @@ $PY scripts/eval_ocr_recognition.py --split test --ocr-dir outputs/ocr/test-gpu 
 $PY scripts/eval_ocr_e2e.py --split test --ocr-dir outputs/ocr/test-gpu [--out F]  # -> outputs/eval/e2e_test.json
 $PY scripts/run_ocr_batch.py --split test --limit 40 --device cpu --out-dir outputs/ocr/test-cpu-latency  # CPU latency sample, ~20 min
 $PY scripts/eval_ocr_confidence.py --split test [--ocr-dir outputs/ocr/test-gpu] [--latency-dir outputs/ocr/test-cpu-latency] [--out F] [--chart P] [--iou 0.5]  # -> outputs/eval/confidence_test.json + confidence_hist_test.png
+$PY scripts/ocr_error_report.py --split test [--ocr-dir outputs/ocr/test-gpu] [--out F] [--iou 0.5] [--examples 3]  # -> outputs/eval/ocr_errors_test.json
 
 G=/e/Anaconda/Enviroment/riq-gpu/python.exe        # GPU env, see Environment
 $G -m pytest                                        # tests must pass in both envs
@@ -130,6 +131,13 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   `scripts/eval_ocr_confidence.py` runs it on `line_pairs` with the same loaders, reports
   latency for `--ocr-dir` and the optional `--latency-dir` CPU sample, and draws the chart with
   Pillow inside the script (never add matplotlib).
+  `ml/ocr_errors.py` (RIQ-23) is pure-Python (same ban): `error_report` excludes GT artefacts in
+  order (`is_comma_cut`, `is_comma_cut_variant`, `is_known_gt_typo`), then `classify` gives each
+  wrong pair one heuristic category from a difflib diff of the space-free normalized texts
+  (`spacing`, `punctuation`, `symbol`, `digit_letter`, `char_substitution`, `extra_text`,
+  `missing_text`, `inner_insert_delete`, `mixed`). Add a token to `KNOWN_GT_TYPOS` only after
+  checking the receipt image. `scripts/ocr_error_report.py` builds `line_pairs` with the same
+  loaders. The results write-up is "Results (RIQ-23)" in `docs/baseline.md`.
 - Open GT data bug (separate from box splitting): in both splits many GT `words` are cut at the
   first comma while the box spans the whole printed line (GT `9` for `9, JALAN SUBANG JASA 3,`,
   `1` for `1,007.50`); no `words` element contains a comma. It inflates CER and will affect
