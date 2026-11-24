@@ -22,7 +22,7 @@ ROW_OVERLAP_MIN = 0.5
 @dataclass(frozen=True)
 class OcrRow:
     text: str  # source texts in x order, joined by one space
-    bbox: list[float]  # union of the source boxes, [x_min, y_min, x_max, y_max]
+    bbox: tuple[float, float, float, float]  # union of the source boxes, (x0, y0, x1, y1)
     source_indices: tuple[int, ...]  # indices into the input sequence, in x order
     confidences: tuple[float, ...]  # source confidences, same order as source_indices
 
@@ -60,7 +60,7 @@ def group_rows(lines: Sequence[OcrLine]) -> list[OcrRow]:
         rows.append(
             OcrRow(
                 text=" ".join(lines[i].text for i in members),
-                bbox=union,
+                bbox=tuple(union),
                 source_indices=tuple(members),
                 confidences=tuple(lines[i].confidence for i in members),
             )
