@@ -138,6 +138,18 @@ The first OCR run downloads PP-OCRv6_medium det + rec (about 135 MB) to `~/.padd
   `missing_text`, `inner_insert_delete`, `mixed`). Add a token to `KNOWN_GT_TYPOS` only after
   checking the receipt image. `scripts/ocr_error_report.py` builds `line_pairs` with the same
   loaders. The results write-up is "Results (RIQ-23)" in `docs/baseline.md`.
+- `ml/reading_order.py` (RIQ-24) is pure Python (no paddle, cv2, datasets, PIL or numpy):
+  `group_rows(lines)` turns `OcrLine`s into frozen `OcrRow`s (`text` joined by one space in x
+  order, union `bbox` tuple, `source_indices` into the input, `confidences`), rows top to bottom.
+  Lines are visited by (y_min, x_min, index) and join the current row only if their vertical
+  overlap with EVERY member is ≥ `ROW_OVERLAP_MIN` (0.5) of the smaller height; testing the
+  growing union box instead let tall stamp boxes and skewed scans chain rows. Text stays raw
+  (no `normalize_text`). Field extractors (RIQ-25..27) should cite `source_indices` as evidence.
+  Known limits: two different columns at the same height still merge into one row
+  (`Salesperson:` + `Date. 09/02/2018`); grouping is geometric by design and telling fields
+  apart belongs to the extractors. A tall box joins one row only, and strong skew can still pair
+  the wrong columns. `ROW_OVERLAP_MIN` = 0.5 is untuned; tune it after the RIQ-29 field metrics
+  exist, on the train split, never on test.
 - Open GT data bug (separate from box splitting): in both splits many GT `words` are cut at the
   first comma while the box spans the whole printed line (GT `9` for `9, JALAN SUBANG JASA 3,`,
   `1` for `1,007.50`); no `words` element contains a comma. It inflates CER and will affect
