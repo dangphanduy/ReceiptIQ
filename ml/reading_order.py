@@ -38,14 +38,16 @@ def _same_row(a: Sequence[float], b: Sequence[float]) -> bool:
 def group_rows(lines: Sequence[OcrLine]) -> list[OcrRow]:
     """Group lines into visual rows, ordered top to bottom; lines in a row go left to right.
 
-    Lines are visited by (y_min, x_min, index). Each joins the current row if it overlaps the
-    row's union box (`_same_row`), otherwise it starts a new row. The input is not modified.
+    Lines are visited by (y_min, x_min, index). Each joins the current row if it is `_same_row`
+    with every line already in it, otherwise it starts a new row. Testing every member, not the
+    growing union box, keeps a tall box (stamp) or a skewed scan from chaining rows together.
+    The input is not modified.
     """
     order = sorted(range(len(lines)), key=lambda i: (lines[i].bbox[1], lines[i].bbox[0], i))
     groups: list[tuple[list[int], list[float]]] = []  # (member indices, union bbox)
     for i in order:
         box = lines[i].bbox
-        if groups and _same_row(groups[-1][1], box):
+        if groups and all(_same_row(lines[j].bbox, box) for j in groups[-1][0]):
             members, union = groups[-1]
             members.append(i)
             union[:] = [*map(min, union[:2], box[:2]), *map(max, union[2:], box[2:])]

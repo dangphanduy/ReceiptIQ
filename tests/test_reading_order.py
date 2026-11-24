@@ -71,6 +71,21 @@ def test_rows_with_different_heights():
     assert [r.source_indices for r in rows] == [(2, 1), (0,)]
 
 
+def test_tall_box_joins_one_row_and_does_not_chain_the_rows_it_spans():
+    # Shape seen in X51006388089: a stamp box spanning three printed rows on the right.
+    lines = [
+        line("1082", 450, 0, 670, 146),
+        line("TAX", 55, 11, 115, 46),
+        line("0.00", 212, 11, 277, 49),
+        line("ROUNDING", 55, 43, 219, 81),
+        line("0.01", 272, 46, 335, 81),
+        line("TOTAL", 54, 77, 151, 113),
+        line("103.00", 214, 78, 309, 117),
+    ]
+    rows = group_rows(lines)
+    assert [r.text for r in rows] == ["TAX 0.00 1082", "ROUNDING 0.01", "TOTAL 103.00"]
+
+
 def test_shuffled_input_gives_the_same_rows():
     expected = group_rows(RECEIPT)
     for seed in range(5):
