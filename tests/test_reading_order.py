@@ -33,13 +33,13 @@ def test_empty_input_gives_no_rows():
 
 def test_single_line_is_one_row():
     rows = group_rows([line("SHOP SDN BHD", 10, 5, 200, 25, 0.8)])
-    assert rows == [OcrRow("SHOP SDN BHD", [10, 5, 200, 25], (0,), (0.8,))]
+    assert rows == [OcrRow("SHOP SDN BHD", (10, 5, 200, 25), (0,), (0.8,))]
 
 
 def test_label_and_amount_on_one_row_read_left_to_right():
     amount, label = line("12.50", 300, 100, 350, 120, 0.7), line("TOTAL", 10, 100, 90, 120, 0.6)
     rows = group_rows([amount, label])
-    assert rows == [OcrRow("TOTAL 12.50", [10, 100, 350, 120], (1, 0), (0.6, 0.7))]
+    assert rows == [OcrRow("TOTAL 12.50", (10, 100, 350, 120), (1, 0), (0.6, 0.7))]
 
 
 def test_two_separate_rows_do_not_merge_and_read_top_to_bottom():
@@ -51,7 +51,7 @@ def test_two_separate_rows_do_not_merge_and_read_top_to_bottom():
 def test_slight_skew_still_groups_columns_per_row():
     rows = group_rows(RECEIPT)
     assert [r.text for r in rows] == ["ITEM A 5.00", "ITEM B 7.50", "TOTAL 12.50"]
-    assert rows[2].bbox == [10, 160, 350, 185]
+    assert rows[2].bbox == (10, 160, 350, 185)
     assert rows[2].confidences == (0.99, 0.97)
 
 
@@ -134,6 +134,15 @@ def test_row_is_frozen():
     row = group_rows([line("A", 0, 0, 10, 10)])[0]
     with pytest.raises(dataclasses.FrozenInstanceError):
         row.text = "B"
+
+
+def test_row_bbox_is_an_immutable_tuple():
+    # Codex F1: a list bbox inside a frozen row could still be edited in place.
+    row = group_rows([OcrLine("A", 0.9, [], [0, 0, 10, 10])])[0]
+    assert type(row.bbox) is tuple
+    with pytest.raises(TypeError):
+        row.bbox[0] = 999
+    assert row.bbox == (0, 0, 10, 10)
 
 
 def test_import_does_not_load_heavy_modules():
