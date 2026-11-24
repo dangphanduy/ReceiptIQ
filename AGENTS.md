@@ -17,8 +17,10 @@ provenance and CC BY 4.0 attribution.
   normalization), `ocr_recognition.py` (edit distance, CER, line exact match),
   `ocr_errors.py` (RIQ-23: excludes GT artefacts with `is_comma_cut`, `is_comma_cut_variant`
   and `KNOWN_GT_TYPOS`, then gives each wrong line pair one heuristic error category; add a
-  typo only after checking the receipt image). These stay pure Python: they never import
-  paddle, cv2 or datasets.
+  typo only after checking the receipt image), `reading_order.py` (RIQ-24: `group_rows`
+  merges OCR lines on the same visual row into `OcrRow`s, top to bottom and left to right,
+  keeping raw text and the source line indices as provenance). These stay pure Python: they
+  never import paddle, cv2 or datasets.
 - `scripts/`: download SROIE, single-image OCR, resumable batch OCR, detection and
   recognition eval, OCR error report, EDA.
 - `tests/`: fast, model-free pytest. `docs/`: provenance, plans, findings.
